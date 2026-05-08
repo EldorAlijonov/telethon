@@ -1,0 +1,12 @@
+.env
+*.db
+*.session
+*.session-journal
+*.db-wal
+*.db-shm
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.test-tmp/
+.venv/
+venv/
