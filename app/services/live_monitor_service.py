@@ -148,7 +148,7 @@ class LiveMonitorService:
         if getattr(event, "out", False):
             return
         TELETHON_EVENTS.inc()
-        timer = SIGNAL_LATENCY.time()
+        processing_started = monotonic()
         chat_id = int(getattr(event, "chat_id", 0) or 0)
         sender_id = getattr(event, "sender_id", None)
         if not chat_id or chat_id in self.blacklist_ids or (sender_id and int(sender_id) in self.blacklist_ids) or sender_id == own_id:
@@ -246,7 +246,7 @@ class LiveMonitorService:
                 delivery = await delivery_repo.get_by_signal_recipient(signal_id, tg_id)
                 if delivery:
                     await delivery_repo.mark_failed(delivery, delivery_error or "UnknownError")
-        timer.observe_duration()
+        SIGNAL_LATENCY.observe(monotonic() - processing_started)
 
     async def stop_monitoring(self, tg_id: int) -> None:
         await self.monitor_state.set_enabled(tg_id, False)
