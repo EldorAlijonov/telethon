@@ -47,6 +47,7 @@ fi
 mkdir -p "$APP_DIR/current" "$APP_DIR/logs" "$APP_DIR/backups" "$CONFIG_DIR"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 chmod 750 "$APP_DIR" "$APP_DIR/current" "$APP_DIR/logs" "$APP_DIR/backups"
+chown root:"$APP_USER" "$CONFIG_DIR"
 chmod 750 "$CONFIG_DIR"
 
 rsync -a --delete \
