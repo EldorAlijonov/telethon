@@ -1,0 +1,28 @@
+[Unit]
+Description=Telegram Monitor Bot
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=telegram-monitor
+Group=telegram-monitor
+WorkingDirectory=/opt/telegram-monitor/current
+EnvironmentFile=/etc/telegram-monitor/telegram-monitor.env
+ExecStart=/opt/telegram-monitor/venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+KillSignal=SIGINT
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/telegram-monitor/logs /opt/telegram-monitor/backups
+
+StandardOutput=append:/opt/telegram-monitor/logs/bot.log
+StandardError=append:/opt/telegram-monitor/logs/bot.err.log
+
+[Install]
+WantedBy=multi-user.target
