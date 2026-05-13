@@ -1,159 +1,96 @@
 from __future__ import annotations
 
-from app.database import Database
-from app.utils import add_30_days_str, now_dt, now_str, parse_dt
+from datetime import UTC, datetime
+
+from app.db.models import AuditAction, User, UserStatus
+from app.db.session import Database
+from app.repositories.audit_repository import AuditRepository
+from app.repositories.session_repository import TelegramSessionRepository
+from app.repositories.user_repository import UserRepository
 
 
 class UserService:
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, default_access_days: int):
         self.db = db
+        self.default_access_days = default_access_days
 
-    def create_or_update_user(self, tg_id: int, full_name: str, username: str | None, phone: str | None = None) -> None:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute('SELECT * FROM users WHERE tg_id = ?', (tg_id,))
-            row = c.fetchone()
-            if row:
-                current = dict(row)
-                c.execute(
-                    'UPDATE users SET full_name = ?, username = ?, phone = ?, updated_at = ? WHERE tg_id = ?',
-                    (full_name, username, phone if phone is not None else current.get('phone'), now_str(), tg_id),
-                )
-                return
-            c.execute(
-                '''
-                INSERT INTO users (
-                    tg_id, full_name, username, phone, status,
-                    approved_at, expires_at, telethon_phone,
-                    telethon_session, telethon_connected_at,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, ?, ?)
-                ''',
-                (tg_id, full_name, username, phone, now_str(), now_str()),
-            )
+    async def register_or_update(self, tg_id: int, full_name: str | None, username: str | None, phone: str | None = None) -> User:
+        async with self.db.session() as session:
+            repo = UserRepository(session)
+            user = await repo.upsert_user(tg_id, full_name, username, phone)
+            await AuditRepository(session).write(AuditAction.user_registered, target_tg_id=tg_id)
+            return user
 
-    def save_phone(self, tg_id: int, phone: str, full_name: str, username: str | None) -> None:
-        self.create_or_update_user(tg_id, full_name, username, phone)
+    async def get(self, tg_id: int) -> User | None:
+        async with self.db.session() as session:
+            return await UserRepository(session).get_by_tg_id(tg_id)
 
-    def get_user_by_tg_id(self, tg_id: int) -> dict | None:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute('SELECT * FROM users WHERE tg_id = ?', (tg_id,))
-            row = c.fetchone()
-            return dict(row) if row else None
+    async def is_allowed(self, tg_id: int) -> bool:
+        async with self.db.session() as session:
+            repo = UserRepository(session)
+            await repo.mark_expired_users()
+            user = await repo.get_by_tg_id(tg_id)
+            return bool(user and user.status == UserStatus.approved and user.expires_at and user.expires_at > datetime.now(UTC))
 
-    def get_pending_users(self) -> list[dict]:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute("SELECT * FROM users WHERE status = 'pending' ORDER BY id DESC")
-            return [dict(r) for r in c.fetchall()]
-
-    def get_approved_users(self) -> list[dict]:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute("SELECT * FROM users WHERE status = 'approved' ORDER BY id DESC")
-            return [dict(r) for r in c.fetchall()]
-
-    def get_all_users(self) -> list[dict]:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute('SELECT * FROM users ORDER BY id DESC')
-            return [dict(r) for r in c.fetchall()]
-
-    def approve_user(self, tg_id: int) -> bool:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute('SELECT 1 FROM users WHERE tg_id = ?', (tg_id,))
-            if not c.fetchone():
+    async def approve(self, tg_id: int, admin_tg_id: int, access_days: int | None = None) -> bool:
+        async with self.db.session() as session:
+            repo = UserRepository(session)
+            user = await repo.get_by_tg_id(tg_id)
+            if not user:
                 return False
-            c.execute(
-                'UPDATE users SET status = ?, approved_at = ?, expires_at = ?, updated_at = ? WHERE tg_id = ?',
-                ('approved', now_str(), add_30_days_str(), now_str(), tg_id),
-            )
+            days = access_days or self.default_access_days
+            await repo.approve(user, admin_tg_id, days)
+            await AuditRepository(session).write(AuditAction.user_approved, actor_tg_id=admin_tg_id, target_tg_id=tg_id, details={"access_days": days})
             return True
 
-    def delete_user(self, tg_id: int) -> bool:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute('SELECT 1 FROM users WHERE tg_id = ?', (tg_id,))
-            if not c.fetchone():
+    async def block(self, tg_id: int, admin_tg_id: int, reason: str | None = None) -> bool:
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
                 return False
-            c.execute('DELETE FROM users WHERE tg_id = ?', (tg_id,))
-            c.execute('DELETE FROM keyword_rules WHERE tg_id = ?', (tg_id,))
-            c.execute('DELETE FROM monitor_settings WHERE tg_id = ?', (tg_id,))
+            await TelegramSessionRepository(session).revoke(user.id)
+            await UserRepository(session).block(user, admin_tg_id, reason)
+            await AuditRepository(session).write(AuditAction.user_blocked, actor_tg_id=admin_tg_id, target_tg_id=tg_id, details={"reason": reason})
             return True
 
-    def is_user_allowed(self, tg_id: int) -> bool:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute('SELECT * FROM users WHERE tg_id = ?', (tg_id,))
-            row = c.fetchone()
-            if not row:
+    async def reject(self, tg_id: int, admin_tg_id: int, reason: str | None = None) -> bool:
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
                 return False
-            user = dict(row)
-            if user.get('status') != 'approved':
-                return False
-            exp = parse_dt(user.get('expires_at'))
-            if not exp:
-                return False
-            if exp < now_dt():
-                c.execute(
-                    "UPDATE users SET status = 'expired', telethon_phone = NULL, telethon_session = NULL, telethon_connected_at = NULL, updated_at = ? WHERE tg_id = ?",
-                    (now_str(), tg_id),
-                )
-                c.execute('UPDATE monitor_settings SET is_enabled = 0, updated_at = ? WHERE tg_id = ?', (now_str(), tg_id))
-                return False
+            await UserRepository(session).reject(user, admin_tg_id, reason)
+            await AuditRepository(session).write(AuditAction.user_rejected, actor_tg_id=admin_tg_id, target_tg_id=tg_id, details={"reason": reason})
             return True
 
-    def save_telethon_session(self, tg_id: int, phone: str, session: str) -> None:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute(
-                'UPDATE users SET telethon_phone = ?, telethon_session = ?, telethon_connected_at = ?, updated_at = ? WHERE tg_id = ?',
-                (phone, session, now_str(), now_str(), tg_id),
-            )
+    async def delete(self, tg_id: int, admin_tg_id: int, reason: str | None = None) -> bool:
+        async with self.db.session() as session:
+            repo = UserRepository(session)
+            user = await repo.get_by_tg_id(tg_id)
+            if not user:
+                return False
+            await TelegramSessionRepository(session).revoke(user.id)
+            await AuditRepository(session).write(AuditAction.user_deleted, actor_tg_id=admin_tg_id, target_tg_id=tg_id, details={"reason": reason})
+            await repo.delete(user)
+            return True
 
-    def clear_telethon_session(self, tg_id: int) -> None:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute(
-                'UPDATE users SET telethon_phone = NULL, telethon_session = NULL, telethon_connected_at = NULL, updated_at = ? WHERE tg_id = ?',
-                (now_str(), tg_id),
-            )
-            c.execute('UPDATE monitor_settings SET is_enabled = 0, updated_at = ? WHERE tg_id = ?', (now_str(), tg_id))
+    async def list_pending(self) -> list[User]:
+        async with self.db.session() as session:
+            return await UserRepository(session).list_by_status(UserStatus.pending)
 
-    def has_telethon_session(self, tg_id: int) -> bool:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute('SELECT telethon_session FROM users WHERE tg_id = ?', (tg_id,))
-            row = c.fetchone()
-            return bool(row and row['telethon_session'])
+    async def list_approved(self) -> list[User]:
+        async with self.db.session() as session:
+            return await UserRepository(session).list_by_status(UserStatus.approved)
 
-    def get_user_stats(self) -> dict:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute(
-                "UPDATE users SET status = 'expired', telethon_phone = NULL, telethon_session = NULL, telethon_connected_at = NULL, updated_at = ? WHERE status = 'approved' AND expires_at IS NOT NULL AND expires_at < datetime('now')",
-                (now_str(),),
-            )
-            c.execute('UPDATE monitor_settings SET is_enabled = 0, updated_at = ? WHERE tg_id IN (SELECT tg_id FROM users WHERE status = \'expired\')', (now_str(),))
-            c.execute('SELECT COUNT(*) FROM users')
-            total = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM users WHERE status = 'pending'")
-            pending = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM users WHERE status = 'approved' AND expires_at >= datetime('now')")
-            active = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM users WHERE status = 'expired'")
-            expired = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM users WHERE status = 'approved' AND expires_at >= datetime('now') AND telethon_session IS NOT NULL AND telethon_session != ''")
-            telethon_connected = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM monitor_settings WHERE is_enabled = 1")
-            monitoring_enabled = c.fetchone()[0]
-            return {
-                'total': total,
-                'pending': pending,
-                'active': active,
-                'expired': expired,
-                'telethon_connected': telethon_connected,
-                'monitoring_enabled': monitoring_enabled,
-            }
+    async def list_blocked(self) -> list[User]:
+        async with self.db.session() as session:
+            return await UserRepository(session).list_by_status(UserStatus.blocked)
+
+    async def list_all(self) -> list[User]:
+        async with self.db.session() as session:
+            return await UserRepository(session).list_all()
+
+    async def stats(self) -> dict[str, int]:
+        async with self.db.session() as session:
+            repo = UserRepository(session)
+            await repo.mark_expired_users()
+            return await repo.stats()

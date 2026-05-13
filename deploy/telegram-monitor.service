@@ -1,0 +1,19 @@
+[Unit]
+Description=Telegram Monitor Bot
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/telegram-monitor
+ExecStart=/usr/bin/docker compose up --remove-orphans
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=0
+TimeoutStopSec=120
+User=root
+
+[Install]
+WantedBy=multi-user.target

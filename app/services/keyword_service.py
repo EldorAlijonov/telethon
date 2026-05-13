@@ -1,132 +1,95 @@
 from __future__ import annotations
 
-from app.database import Database
-from app.utils import now_str
+from time import monotonic
+
+from app.db.session import Database
+from app.repositories.keyword_repository import KeywordRepository
+from app.repositories.user_repository import UserRepository
 
 
 class KeywordService:
     def __init__(self, db: Database, default_keywords: list[str] | None = None):
         self.db = db
         self.default_keywords = self._normalize_many(default_keywords or [])
+        self._cache: dict[int, tuple[float, list[str]]] = {}
+        self._cache_ttl_seconds = 15.0
 
     @staticmethod
-    def _normalize_many(values: list[str]) -> list[str]:
+    def normalize(value: str) -> str:
+        return " ".join((value or "").strip().lower().split())
+
+    @classmethod
+    def _normalize_many(cls, values: list[str]) -> list[str]:
         result: list[str] = []
         seen: set[str] = set()
         for value in values:
-            item = (value or '').strip().lower()
+            item = cls.normalize(value)
             if item and item not in seen:
                 seen.add(item)
                 result.append(item)
         return result
 
-    @staticmethod
-    def _normalize_one(value: str) -> str:
-        return (value or '').strip().lower()
-
-    def ensure_default_keywords(self, tg_id: int) -> int:
-        if not self.default_keywords:
-            return 0
-
-        inserted = 0
-        with self.db.connect() as conn:
-            c = conn.cursor()
+    async def ensure_defaults(self, tg_id: int) -> None:
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
+                return
+            repo = KeywordRepository(session)
+            existing = set(await repo.list_active(user.id))
             for keyword in self.default_keywords:
-                c.execute(
-                    'SELECT 1 FROM keyword_rules WHERE tg_id = ? AND keyword = ?',
-                    (tg_id, keyword),
-                )
-                if c.fetchone():
-                    continue
-                c.execute(
-                    """
-                    INSERT INTO keyword_rules (tg_id, keyword, is_active, created_at)
-                    VALUES (?, ?, 1, ?)
-                    """,
-                    (tg_id, keyword, now_str()),
-                )
-                inserted += 1
-        return inserted
+                if keyword not in existing:
+                    await repo.add(user.id, keyword)
 
-    def get_keywords(self, tg_id: int) -> list[str]:
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute(
-                """
-                SELECT keyword
-                FROM keyword_rules
-                WHERE tg_id = ? AND is_active = 1
-                ORDER BY keyword ASC
-                """,
-                (tg_id,),
-            )
-            rows = [row['keyword'] for row in c.fetchall()]
+    async def list_keywords(self, tg_id: int) -> list[str]:
+        now = monotonic()
+        cached = self._cache.get(tg_id)
+        if cached and cached[0] > now:
+            return list(cached[1])
 
-        if rows:
-            return rows
+        await self.ensure_defaults(tg_id)
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
+                return []
+            keywords = await KeywordRepository(session).list_active(user.id)
+        self._cache[tg_id] = (now + self._cache_ttl_seconds, list(keywords))
+        return keywords
 
-        if self.default_keywords:
-            self.ensure_default_keywords(tg_id)
-            return self.get_keywords(tg_id)
+    def invalidate_cache(self, tg_id: int) -> None:
+        self._cache.pop(tg_id, None)
 
-        return []
+    async def add_keyword(self, tg_id: int, keyword: str) -> tuple[bool, str]:
+        keyword = self.normalize(keyword)
+        if len(keyword) < 2 or len(keyword) > 128:
+            return False, "Kalit so'z 2-128 belgi oralig'ida bo'lishi kerak."
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
+                return False, "Foydalanuvchi topilmadi."
+            ok = await KeywordRepository(session).add(user.id, keyword)
+            if ok:
+                self.invalidate_cache(tg_id)
+            return (ok, "Kalit so'z qo'shildi." if ok else "Bu kalit so'z allaqachon mavjud.")
 
-    def add_keyword(self, tg_id: int, keyword: str) -> tuple[bool, str]:
-        keyword = self._normalize_one(keyword)
-        if not keyword:
-            return False, 'Kalit so‘z bo‘sh bo‘lmasligi kerak.'
+    async def delete_keyword(self, tg_id: int, keyword: str) -> bool:
+        keyword = self.normalize(keyword)
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            deleted = bool(user and await KeywordRepository(session).delete(user.id, keyword))
+        if deleted:
+            self.invalidate_cache(tg_id)
+        return deleted
 
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            try:
-                c.execute(
-                    """
-                    INSERT INTO keyword_rules (tg_id, keyword, is_active, created_at)
-                    VALUES (?, ?, 1, ?)
-                    """,
-                    (tg_id, keyword, now_str()),
-                )
-                return True, 'Kalit so‘z qo‘shildi.'
-            except Exception:
-                return False, 'Bu kalit so‘z allaqachon mavjud.'
-
-    def delete_keyword(self, tg_id: int, keyword: str) -> bool:
-        keyword = self._normalize_one(keyword)
-        if not keyword:
-            return False
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute(
-                'DELETE FROM keyword_rules WHERE tg_id = ? AND keyword = ?',
-                (tg_id, keyword),
-            )
-            return c.rowcount > 0
-
-    def edit_keyword(self, tg_id: int, old_keyword: str, new_keyword: str) -> tuple[bool, str]:
-        old_keyword = self._normalize_one(old_keyword)
-        new_keyword = self._normalize_one(new_keyword)
-
-        if not old_keyword or not new_keyword:
-            return False, 'Eski va yangi kalit so‘z kiritilishi kerak.'
-
-        with self.db.connect() as conn:
-            c = conn.cursor()
-            c.execute(
-                'SELECT 1 FROM keyword_rules WHERE tg_id = ? AND keyword = ?',
-                (tg_id, old_keyword),
-            )
-            if not c.fetchone():
-                return False, 'Eski kalit so‘z topilmadi.'
-
-            c.execute(
-                'SELECT 1 FROM keyword_rules WHERE tg_id = ? AND keyword = ?',
-                (tg_id, new_keyword),
-            )
-            if c.fetchone():
-                return False, 'Yangi kalit so‘z allaqachon mavjud.'
-
-            c.execute(
-                'UPDATE keyword_rules SET keyword = ? WHERE tg_id = ? AND keyword = ?',
-                (new_keyword, tg_id, old_keyword),
-            )
-            return True, 'Kalit so‘z yangilandi.'
+    async def rename_keyword(self, tg_id: int, old_keyword: str, new_keyword: str) -> tuple[bool, str]:
+        old_keyword = self.normalize(old_keyword)
+        new_keyword = self.normalize(new_keyword)
+        if not old_keyword or len(new_keyword) < 2:
+            return False, "Eski va yangi kalit so'z to'g'ri kiritilishi kerak."
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
+                return False, "Foydalanuvchi topilmadi."
+            ok = await KeywordRepository(session).rename(user.id, old_keyword, new_keyword)
+            if ok:
+                self.invalidate_cache(tg_id)
+            return (ok, "Kalit so'z yangilandi." if ok else "Kalit so'z topilmadi yoki yangi qiymat mavjud.")

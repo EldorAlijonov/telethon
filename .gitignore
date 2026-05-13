@@ -10,3 +10,11 @@ __pycache__/
 .test-tmp/
 .venv/
 venv/
+backups/
+.pgdata/
+.pgdata*
+*.log
+*.pid
+bot.err.log
+bot.log
+bot.pid

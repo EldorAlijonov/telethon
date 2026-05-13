@@ -5,189 +5,303 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from app.config import Config
+from app.core.config import Settings
 from app.filters import AdminFilter
-from app.keyboards import admin_panel_keyboard, back_to_admin_panel_keyboard, pending_user_action_keyboard
+from app.keyboards import (
+    BTN_ADMIN_CONTROL_MENU,
+    BTN_ADMIN_SYSTEM_MENU,
+    BTN_ADMIN_USERS_MENU,
+    BTN_ALL,
+    BTN_APPROVE_ID,
+    BTN_APPROVED,
+    BTN_BACK_ADMIN,
+    BTN_BLOCK_ID,
+    BTN_BLOCKED,
+    BTN_BROADCAST,
+    BTN_DELETE_ID,
+    BTN_HEALTH,
+    BTN_MONITORING,
+    BTN_PENDING,
+    BTN_STATS,
+    admin_control_keyboard,
+    admin_panel_keyboard,
+    admin_system_keyboard,
+    admin_users_keyboard,
+    back_to_admin_panel_keyboard,
+    pending_user_action_keyboard,
+)
+from app.services.broadcast_service import BroadcastService
+from app.services.health_service import HealthService
+from app.services.live_monitor_service import LiveMonitorService
 from app.services.user_service import UserService
 from app.states.admin_states import AdminActionState
 from app.utils import format_user_card
 
 
-def register_admin_handlers(user_service: UserService, config: Config) -> Router:
+def register_admin_handlers(
+    user_service: UserService,
+    health_service: HealthService,
+    broadcast_service: BroadcastService,
+    live_monitor_service: LiveMonitorService,
+    settings: Settings,
+) -> Router:
     router = Router()
-    admin_filter = AdminFilter(config.admin_id)
+    admin_filter = AdminFilter(settings.effective_admin_ids)
 
-    async def send_admin_panel(message: Message):
-        await message.answer('🛠 Admin panel', reply_markup=admin_panel_keyboard())
-
-    @router.message(Command('start'), admin_filter)
-    async def admin_start(message: Message, state: FSMContext):
+    @router.message(Command("admin"), admin_filter)
+    @router.message(F.text == BTN_BACK_ADMIN, admin_filter)
+    async def panel(message: Message, state: FSMContext):
         await state.clear()
-        await send_admin_panel(message)
+        await message.answer("Admin panel", reply_markup=admin_panel_keyboard())
 
-    @router.message(Command('admin'), admin_filter)
-    async def admin_panel_cmd(message: Message):
-        await send_admin_panel(message)
-
-    @router.message(F.text == '🛠 Admin panel', admin_filter)
-    async def admin_panel_btn(message: Message):
-        await send_admin_panel(message)
-
-    @router.message(F.text == '⬅️ Admin panelga qaytish', admin_filter)
-    async def back_to_panel(message: Message, state: FSMContext):
+    @router.message(F.text == BTN_ADMIN_USERS_MENU, admin_filter)
+    async def admin_users_menu(message: Message, state: FSMContext):
         await state.clear()
-        await send_admin_panel(message)
+        await message.answer("👥 Foydalanuvchilar bo'limi", reply_markup=admin_users_keyboard())
 
-    @router.message(F.text == '⏳ Tasdiqlash kutilayotganlar', admin_filter)
+    @router.message(F.text == BTN_ADMIN_CONTROL_MENU, admin_filter)
+    async def admin_control_menu(message: Message, state: FSMContext):
+        await state.clear()
+        await message.answer("🧭 Boshqaruv bo'limi", reply_markup=admin_control_keyboard())
+
+    @router.message(F.text == BTN_ADMIN_SYSTEM_MENU, admin_filter)
+    async def admin_system_menu(message: Message, state: FSMContext):
+        await state.clear()
+        await message.answer("⚙️ Tizim bo'limi", reply_markup=admin_system_keyboard())
+
+    @router.message(F.text == BTN_PENDING, admin_filter)
     async def pending_users(message: Message):
-        users = [user for user in user_service.get_pending_users() if user['tg_id'] != config.admin_id]
+        users = await user_service.list_pending()
         if not users:
-            await message.answer('⏳ Tasdiqlash kutilayotgan foydalanuvchilar mavjud emas.', reply_markup=back_to_admin_panel_keyboard())
+            await message.answer("Tasdiqlash kutilayotgan foydalanuvchilar yo'q.", reply_markup=admin_users_keyboard())
             return
-        await message.answer('⏳ Tasdiqlash kutilayotgan foydalanuvchilar:', reply_markup=back_to_admin_panel_keyboard())
+        await message.answer("Tasdiqlash kutilayotgan foydalanuvchilar:", reply_markup=admin_users_keyboard())
         for user in users:
-            await message.answer(format_user_card(user), reply_markup=pending_user_action_keyboard(user['tg_id']))
-        await message.answer('Tasdiqlash uchun “✅ ID orqali tasdiqlash” tugmasini bosing.', reply_markup=admin_panel_keyboard())
+            await message.answer(format_user_card(user), reply_markup=pending_user_action_keyboard(user.tg_id))
 
-    @router.callback_query(F.data.startswith('admin_pending:'))
-    async def pending_user_action(callback: CallbackQuery):
-        if callback.from_user.id != config.admin_id:
-            await callback.answer('Siz admin emassiz.', show_alert=True)
+    @router.callback_query(F.data.startswith("admin_user:"))
+    async def user_action(callback: CallbackQuery, state: FSMContext):
+        if callback.from_user.id not in settings.effective_admin_ids:
+            await callback.answer("Siz admin emassiz.", show_alert=True)
             return
-
-        parts = (callback.data or '').split(':')
-        if len(parts) != 3 or not parts[2].isdigit():
+        _, action, raw_tg_id = (callback.data or "").split(":")
+        tg_id = int(raw_tg_id)
+        if action == "approve":
+            user = await user_service.get(tg_id)
+            if not user:
+                await callback.answer("Foydalanuvchi topilmadi.", show_alert=True)
+                return
+            await state.set_state(AdminActionState.waiting_for_approve_access_days)
+            await state.update_data(approve_tg_id=tg_id)
+            if callback.message:
+                await callback.message.edit_reply_markup(reply_markup=None)
+                await callback.message.answer(
+                    f"ID: {tg_id}\nFoydalanish muddatini kunlarda kiriting.\n\nMasalan: 8",
+                    reply_markup=admin_users_keyboard(),
+                )
+            await callback.answer("Muddatni kiriting")
+            return
+        elif action == "reject":
+            ok = await user_service.reject(tg_id, callback.from_user.id)
+            text = "So'rov bekor qilindi." if ok else "Foydalanuvchi topilmadi."
+            user_text = "Tasdiqlash so'rovingiz bekor qilindi."
+        elif action == "block":
+            ok = await user_service.block(tg_id, callback.from_user.id)
+            text = "Foydalanuvchi bloklandi." if ok else "Foydalanuvchi topilmadi."
+            user_text = "Hisobingiz admin tomonidan bloklandi."
+        else:
             await callback.answer("Noto'g'ri amal.", show_alert=True)
             return
-
-        action = parts[1]
-        tg_id = int(parts[2])
-        if tg_id == config.admin_id:
-            await callback.answer('Adminni bu yerdan boshqarib bo‘lmaydi.', show_alert=True)
-            return
-
-        user = user_service.get_user_by_tg_id(tg_id)
-        if not user or user.get('status') != 'pending':
-            if callback.message:
-                await callback.message.edit_reply_markup(reply_markup=None)
-            await callback.answer('Bu so‘rov allaqachon ko‘rib chiqilgan.', show_alert=True)
-            return
-
-        if action == 'approve':
-            ok = user_service.approve_user(tg_id)
-            if not ok:
-                await callback.answer('Foydalanuvchi topilmadi.', show_alert=True)
-                return
-            if callback.message:
-                await callback.message.edit_reply_markup(reply_markup=None)
-                await callback.message.answer(f'✅ Foydalanuvchi tasdiqlandi.\nID: {tg_id}', reply_markup=admin_panel_keyboard())
+        if callback.message:
+            await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.message.answer(f"{text}\nID: {tg_id}", reply_markup=admin_users_keyboard())
+        if ok:
             try:
-                await callback.bot.send_message(tg_id, '🎉 Siz tasdiqlandingiz. Botdan 1 oy davomida foydalanishingiz mumkin.')
+                await callback.bot.send_message(tg_id, user_text)
             except Exception:
                 pass
-            await callback.answer('Tasdiqlandi')
-            return
+        await callback.answer(text)
 
-        if action == 'reject':
-            ok = user_service.delete_user(tg_id)
-            if not ok:
-                await callback.answer('Foydalanuvchi topilmadi.', show_alert=True)
-                return
-            if callback.message:
-                await callback.message.edit_reply_markup(reply_markup=None)
-                await callback.message.answer(f'❌ So‘rov bekor qilindi.\nID: {tg_id}', reply_markup=admin_panel_keyboard())
-            try:
-                await callback.bot.send_message(tg_id, '❌ Tasdiqlash so‘rovingiz bekor qilindi.')
-            except Exception:
-                pass
-            await callback.answer('Bekor qilindi')
-            return
-
-        await callback.answer("Noto'g'ri amal.", show_alert=True)
-
-    @router.message(F.text == '✅ Tasdiqlangan foydalanuvchilar', admin_filter)
+    @router.message(F.text == BTN_APPROVED, admin_filter)
     async def approved_users(message: Message):
-        users = user_service.get_approved_users()
-        if not users:
-            await message.answer('✅ Tasdiqlangan foydalanuvchilar mavjud emas.', reply_markup=back_to_admin_panel_keyboard())
-            return
-        await message.answer('✅ Tasdiqlangan foydalanuvchilar:', reply_markup=back_to_admin_panel_keyboard())
-        for user in users:
-            await message.answer(format_user_card(user))
-        await message.answer('O‘chirish uchun “🗑 ID orqali o‘chirish” tugmasini bosing.', reply_markup=admin_panel_keyboard())
+        await _send_user_list(message, await user_service.list_approved(), "Tasdiqlangan foydalanuvchilar")
 
-    @router.message(F.text == '👥 Barcha foydalanuvchilar', admin_filter)
+    @router.message(F.text == BTN_BLOCKED, admin_filter)
+    async def blocked_users(message: Message):
+        await _send_user_list(message, await user_service.list_blocked(), "Bloklangan foydalanuvchilar")
+
+    @router.message(F.text == BTN_ALL, admin_filter)
     async def all_users(message: Message):
-        users = user_service.get_all_users()
+        await _send_user_list(message, await user_service.list_all(), "Barcha foydalanuvchilar")
+
+    async def _send_user_list(message: Message, users, title: str):
         if not users:
-            await message.answer('👥 Foydalanuvchilar mavjud emas.', reply_markup=back_to_admin_panel_keyboard())
+            await message.answer(f"{title}: ro'yxat bo'sh.", reply_markup=admin_users_keyboard())
             return
-        await message.answer('👥 Barcha foydalanuvchilar:', reply_markup=back_to_admin_panel_keyboard())
+        await message.answer(f"{title}:", reply_markup=admin_users_keyboard())
         for user in users:
             await message.answer(format_user_card(user))
 
-    @router.message(F.text == '📊 Statistika', admin_filter)
+    @router.message(F.text == BTN_STATS, admin_filter)
     async def stats(message: Message):
-        s = user_service.get_user_stats()
-        text = (
-            '📊 Statistika\n\n'
-            f"👥 Jami foydalanuvchilar: {s['total']}\n"
-            f"⏳ Tasdiqlash kutilayotganlar: {s['pending']}\n"
-            f"✅ Faol foydalanuvchilar: {s['active']}\n"
-            f"⌛ Muddati tugaganlar: {s['expired']}\n"
-            f"🤖 Telegram ulanganlar: {s['telethon_connected']}\n"
-            f"📡 Kuzatish yoqilganlar: {s['monitoring_enabled']}"
+        s = await user_service.stats()
+        await message.answer(
+            "Statistika\n\n"
+            f"Jami: {s.get('total', 0)}\n"
+            f"Kutilmoqda: {s.get('pending', 0)}\n"
+            f"Faol: {s.get('approved', 0)}\n"
+            f"Bloklangan: {s.get('blocked', 0)}\n"
+            f"Muddati tugagan: {s.get('expired', 0)}\n"
+            f"Rad etilgan: {s.get('rejected', 0)}",
+            reply_markup=admin_system_keyboard(),
         )
-        await message.answer(text, reply_markup=back_to_admin_panel_keyboard())
 
-    @router.message(F.text == '🗑 ID orqali o‘chirish', admin_filter)
-    async def ask_delete_id(message: Message, state: FSMContext):
-        await state.set_state(AdminActionState.waiting_for_delete_user_id)
-        await message.answer('O‘chirish uchun foydalanuvchi ID sini yuboring.', reply_markup=back_to_admin_panel_keyboard())
+    @router.message(F.text == BTN_HEALTH, admin_filter)
+    async def health(message: Message):
+        result = await health_service.check()
+        await message.answer(f"System health\n\nDatabase: {result['database']}\nRedis: {result['redis']}", reply_markup=admin_system_keyboard())
 
-    @router.message(F.text == '✅ ID orqali tasdiqlash', admin_filter)
-    async def ask_approve_id(message: Message, state: FSMContext):
-        await state.set_state(AdminActionState.waiting_for_approve_user_id)
-        await message.answer('Tasdiqlash uchun foydalanuvchi ID sini yuboring.', reply_markup=back_to_admin_panel_keyboard())
+    @router.message(F.text == BTN_MONITORING, admin_filter)
+    async def monitoring_control(message: Message, state: FSMContext):
+        stats = live_monitor_service.stats()
+        ids = stats["active_user_ids"]
+        body = "\n".join(f"- {tg_id}" for tg_id in ids[:50]) if ids else "Faol monitoring yo'q."
+        await state.set_state(AdminActionState.waiting_for_stop_monitoring_user_id)
+        await message.answer(
+            "Monitoring nazorati\n\n"
+            f"Faol monitoringlar: {stats['active_count']}\n\n"
+            f"{body}\n\n"
+            "Monitoringni majburan to'xtatish uchun user ID yuboring yoki admin panelga qayting.",
+            reply_markup=admin_control_keyboard(),
+        )
 
-    @router.message(AdminActionState.waiting_for_delete_user_id, admin_filter)
-    async def delete_user_by_id(message: Message, state: FSMContext):
-        raw = (message.text or '').strip()
-        if not raw.isdigit():
-            await message.answer('Iltimos, faqat raqamdan iborat foydalanuvchi ID yuboring.')
+    @router.message(AdminActionState.waiting_for_stop_monitoring_user_id, admin_filter)
+    async def force_stop_monitoring(message: Message, state: FSMContext):
+        if not (message.text or "").isdigit():
+            await message.answer("Faqat raqamdan iborat Telegram ID yuboring.")
             return
-        tg_id = int(raw)
-        ok = user_service.delete_user(tg_id)
-        if not ok:
-            await message.answer('Bunday ID ga ega foydalanuvchi topilmadi.', reply_markup=back_to_admin_panel_keyboard())
-            return
+        tg_id = int(message.text)
+        await live_monitor_service.stop_monitoring(tg_id)
         await state.clear()
-        await message.answer(f'🗑 Foydalanuvchi o‘chirildi.\nID: {tg_id}', reply_markup=admin_panel_keyboard())
-        try:
-            await message.bot.send_message(tg_id, '⛔ Sizning akkauntingiz admin tomonidan o‘chirildi.')
-        except Exception:
-            pass
+        await message.answer(f"Monitoring to'xtatildi.\nID: {tg_id}", reply_markup=admin_control_keyboard())
+
+    @router.message(F.text == BTN_APPROVE_ID, admin_filter)
+    async def ask_approve(message: Message, state: FSMContext):
+        await state.set_state(AdminActionState.waiting_for_approve_user_id)
+        await message.answer("Tasdiqlash uchun Telegram ID yuboring.", reply_markup=admin_users_keyboard())
 
     @router.message(AdminActionState.waiting_for_approve_user_id, admin_filter)
-    async def approve_user_by_id(message: Message, state: FSMContext):
-        raw = (message.text or '').strip()
-        if not raw.isdigit():
-            await message.answer('Iltimos, faqat raqamdan iborat foydalanuvchi ID yuboring.')
+    async def approve_by_id(message: Message, state: FSMContext):
+        if not (message.text or "").isdigit():
+            await message.answer("Faqat raqam yuboring.")
             return
-        tg_id = int(raw)
-        ok = user_service.approve_user(tg_id)
-        if not ok:
-            await message.answer('Bunday ID ga ega foydalanuvchi topilmadi.', reply_markup=back_to_admin_panel_keyboard())
+        tg_id = int(message.text)
+        user = await user_service.get(tg_id)
+        if not user:
+            await state.clear()
+            await message.answer("Foydalanuvchi topilmadi.", reply_markup=admin_users_keyboard())
             return
-        await state.clear()
-        await message.answer(f'✅ Foydalanuvchi tasdiqlandi.\nID: {tg_id}', reply_markup=admin_panel_keyboard())
-        try:
-            await message.bot.send_message(tg_id, '🎉 Siz tasdiqlandingiz. Botdan 1 oy davomida foydalanishingiz mumkin.')
-        except Exception:
-            pass
+        await state.set_state(AdminActionState.waiting_for_approve_access_days)
+        await state.update_data(approve_tg_id=tg_id)
+        await message.answer(
+            f"ID: {tg_id}\nFoydalanish muddatini kunlarda kiriting.\n\nMasalan: 8",
+            reply_markup=admin_users_keyboard(),
+        )
 
-    @router.message(Command('admin'))
-    async def deny_non_admin(message: Message):
-        await message.answer('Siz admin emassiz.')
+    @router.message(AdminActionState.waiting_for_approve_access_days, admin_filter)
+    async def approve_access_days(message: Message, state: FSMContext):
+        raw_days = (message.text or "").strip()
+        if not raw_days.isdigit():
+            await message.answer("Faqat kun sonini raqam bilan yuboring. Masalan: 8")
+            return
+        days = int(raw_days)
+        if days < 1 or days > 3650:
+            await message.answer("Muddat 1 kundan 3650 kungacha bo'lishi kerak.")
+            return
+        data = await state.get_data()
+        tg_id = int(data.get("approve_tg_id", 0))
+        if not tg_id:
+            await state.clear()
+            await message.answer("Tasdiqlanadigan foydalanuvchi topilmadi. Qaytadan urinib ko'ring.", reply_markup=admin_users_keyboard())
+            return
+        ok = await user_service.approve(tg_id, message.from_user.id, access_days=days)
+        await state.clear()
+        if ok:
+            try:
+                await message.bot.send_message(tg_id, f"Hisobingiz tasdiqlandi. Botdan {days} kun foydalanishingiz mumkin.")
+            except Exception:
+                pass
+        await message.answer(
+            f"Tasdiqlandi. Muddat: {days} kun." if ok else "Foydalanuvchi topilmadi.",
+            reply_markup=admin_users_keyboard(),
+        )
+
+    @router.message(F.text == BTN_BLOCK_ID, admin_filter)
+    async def ask_block(message: Message, state: FSMContext):
+        await state.set_state(AdminActionState.waiting_for_block_user_id)
+        await message.answer("Bloklash uchun Telegram ID yuboring.", reply_markup=admin_users_keyboard())
+
+    @router.message(AdminActionState.waiting_for_block_user_id, admin_filter)
+    async def block_by_id(message: Message, state: FSMContext):
+        if not (message.text or "").isdigit():
+            await message.answer("Faqat raqam yuboring.")
+            return
+        ok = await user_service.block(int(message.text), message.from_user.id)
+        await state.clear()
+        await message.answer("Bloklandi." if ok else "Foydalanuvchi topilmadi.", reply_markup=admin_users_keyboard())
+
+    @router.message(F.text == BTN_DELETE_ID, admin_filter)
+    async def ask_delete(message: Message, state: FSMContext):
+        await state.set_state(AdminActionState.waiting_for_delete_user_id)
+        await message.answer(
+            "O'chirish uchun Telegram ID yuboring.\n\n"
+            "Diqqat: foydalanuvchi ma'lumotlari, kalit so'zlari, sessiyasi va signallari bazadan o'chiriladi.",
+            reply_markup=admin_users_keyboard(),
+        )
+
+    @router.message(AdminActionState.waiting_for_delete_user_id, admin_filter)
+    async def delete_by_id(message: Message, state: FSMContext):
+        if not (message.text or "").isdigit():
+            await message.answer("Faqat raqam yuboring.")
+            return
+        tg_id = int(message.text)
+        if tg_id in settings.effective_admin_ids:
+            await state.clear()
+            await message.answer("Admin hisobini bu panel orqali o'chirish mumkin emas.", reply_markup=admin_users_keyboard())
+            return
+        await live_monitor_service.stop_monitoring(tg_id)
+        ok = await user_service.delete(tg_id, message.from_user.id, reason="admin_panel_delete")
+        await state.clear()
+        if ok:
+            try:
+                await message.bot.send_message(tg_id, "Hisobingiz admin tomonidan o'chirildi.")
+            except Exception:
+                pass
+        await message.answer("Foydalanuvchi o'chirildi." if ok else "Foydalanuvchi topilmadi.", reply_markup=admin_users_keyboard())
+
+    @router.message(F.text == BTN_BROADCAST, admin_filter)
+    async def ask_broadcast(message: Message, state: FSMContext):
+        await state.set_state(AdminActionState.waiting_for_broadcast_text)
+        await message.answer("Broadcast matnini yuboring. Bekor qilish uchun admin panelga qayting.", reply_markup=admin_control_keyboard())
+
+    @router.message(AdminActionState.waiting_for_broadcast_text, admin_filter)
+    async def broadcast(message: Message, state: FSMContext):
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("Broadcast matni bo'sh bo'lmasligi kerak.")
+            return
+        result = await broadcast_service.send_to_approved_users(message.bot, message.from_user.id, text)
+        await state.clear()
+        await message.answer(
+            "Broadcast yakunlandi.\n"
+            f"Jami: {result['total']}\n"
+            f"Yuborildi: {result['sent']}\n"
+            f"Xato: {result['failed']}",
+            reply_markup=admin_control_keyboard(),
+        )
+
+    @router.message(Command("admin"))
+    async def deny(message: Message):
+        await message.answer("Siz admin emassiz.")
 
     return router

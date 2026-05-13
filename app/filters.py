@@ -5,8 +5,8 @@ from aiogram.types import Message
 
 
 class AdminFilter(BaseFilter):
-    def __init__(self, admin_id: int):
-        self.admin_id = admin_id
+    def __init__(self, admin_ids: set[int]):
+        self.admin_ids = admin_ids
 
     async def __call__(self, message: Message) -> bool:
-        return bool(message.from_user and message.from_user.id == self.admin_id)
+        return bool(message.from_user and message.from_user.id in self.admin_ids)

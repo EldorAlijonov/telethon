@@ -1,0 +1,34 @@
+{
+  "title": "Telegram Monitor SaaS",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "title": "Active Monitors",
+      "type": "stat",
+      "targets": [
+        {"expr": "active_monitors"}
+      ]
+    },
+    {
+      "title": "Signals Detected",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "rate(signals_detected_total[5m])"}
+      ]
+    },
+    {
+      "title": "Signal Delivery Failures",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "rate(signals_failed_total[5m])"}
+      ]
+    },
+    {
+      "title": "Telethon Events",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "rate(telethon_events_total[5m])"}
+      ]
+    }
+  ]
+}
