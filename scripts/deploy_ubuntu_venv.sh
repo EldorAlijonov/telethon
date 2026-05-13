@@ -95,6 +95,7 @@ if grep -q '^SECRET_KEY=change-this-32-byte-minimum-secret-key$' "$ENV_FILE"; th
 fi
 chown root:"$APP_USER" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
+ln -sfn "$ENV_FILE" "$APP_DIR/current/.env"
 
 python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/python" -m pip install --upgrade pip setuptools wheel
@@ -104,7 +105,7 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR/venv"
 install -m 0644 "$APP_DIR/current/deploy/telegram-monitor-venv.service" "/etc/systemd/system/$SERVICE_NAME.service"
 systemctl daemon-reload
 
-sudo -u "$APP_USER" bash -c "cd '$APP_DIR/current' && set -a && . '$ENV_FILE' && set +a && '$APP_DIR/venv/bin/alembic' upgrade head"
+sudo -u "$APP_USER" bash -c "cd '$APP_DIR/current' && '$APP_DIR/venv/bin/alembic' upgrade head"
 
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
