@@ -401,7 +401,7 @@ class LiveMonitorService:
         safe_username = html.escape(sender_profile.get("username") or "Mavjud emas")
         phone = sender_profile.get("phone")
         safe_phone = html.escape(phone) if phone else None
-        phone_text = f"[{safe_phone}](tel:{safe_phone})" if safe_phone else "Mavjud emas"
+        phone_text = f'<a href="tel:{safe_phone}">{safe_phone}</a>' if safe_phone else "Mavjud emas"
         profile_link = sender_profile.get("profile_link")
         profile_text = f'<a href="{html.escape(profile_link)}">Ochish</a>' if profile_link else "Mavjud emas"
         message_link_text = f'<a href="{html.escape(link)}">Ochish</a>' if link else "Mavjud emas"
