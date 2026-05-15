@@ -399,7 +399,8 @@ class LiveMonitorService:
         safe_chat = html.escape(chat_title)
         safe_sender = html.escape(sender_profile.get("name") or "Noma'lum")
         safe_username = html.escape(sender_profile.get("username") or "Mavjud emas")
-        safe_phone = html.escape(sender_profile.get("phone") or "Mavjud emas")
+        phone = sender_profile.get("phone")
+        phone_text = f'<a href="tel:{html.escape(phone)}">{html.escape(phone)}</a>' if phone else "Mavjud emas"
         profile_link = sender_profile.get("profile_link")
         profile_text = f'<a href="{html.escape(profile_link)}">Ochish</a>' if profile_link else "Mavjud emas"
         message_link_text = f'<a href="{html.escape(link)}">Ochish</a>' if link else "Mavjud emas"
@@ -409,7 +410,7 @@ class LiveMonitorService:
             f"<blockquote>❝ {safe_text} ❞</blockquote>\n\n"
             f"<b>👤 Yozgan:</b> {safe_sender}\n"
             f"<b>🔗 Profil:</b> {profile_text}\n"
-            f"<b>📞 Telefon:</b> <code>{safe_phone}</code>\n"
+            f"<b>📞 Telefon:</b> {phone_text}\n"
             f"<b>🔗 Username:</b> {safe_username}\n\n"
             f"<b>👥 Guruh:</b> {safe_chat}\n\n"
             f"<b>🔗 Xabar havolasi:</b> {message_link_text}\n"
