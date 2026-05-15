@@ -189,11 +189,6 @@ class LiveMonitorService:
                 self._signal_text(0, keyword, text, chat_title, sender_profile, message_at, link),
                 disable_web_page_preview=True,
             )
-            if phone := self._phone_for_call(sender_profile.get("phone")):
-                try:
-                    await bot.send_contact(tg_id, phone_number=phone, first_name=sender_name or "Kontakt")
-                except Exception as exc:
-                    logger.warning("signal_contact_delivery_failed", tg_id=tg_id, error=type(exc).__name__)
             delivered = True
             SIGNALS_DELIVERED.inc()
         except Exception as exc:
@@ -398,16 +393,6 @@ class LiveMonitorService:
         return None
 
     @staticmethod
-    def _phone_for_call(phone: str | None) -> str | None:
-        if not phone:
-            return None
-        value = phone.strip().replace(" ", "").replace("-", "")
-        digits = value[1:] if value.startswith("+") else value
-        if not digits.isdigit():
-            return None
-        return value if value.startswith("+") else f"+{value}"
-
-    @staticmethod
     def _signal_text(signal_id: int, keyword: str, text: str, chat_title: str, sender_profile: dict[str, str | None], message_at: datetime, link: str | None) -> str:
         safe_text = html.escape(text[:3500])
         safe_keyword = html.escape(keyword)
@@ -415,7 +400,8 @@ class LiveMonitorService:
         safe_sender = html.escape(sender_profile.get("name") or "Noma'lum")
         safe_username = html.escape(sender_profile.get("username") or "Mavjud emas")
         phone = sender_profile.get("phone")
-        phone_text = f'<a href="tel:{html.escape(phone)}">{html.escape(phone)}</a>' if phone else "Mavjud emas"
+        safe_phone = html.escape(phone) if phone else None
+        phone_text = f"[{safe_phone}](tel:{safe_phone})" if safe_phone else "Mavjud emas"
         profile_link = sender_profile.get("profile_link")
         profile_text = f'<a href="{html.escape(profile_link)}">Ochish</a>' if profile_link else "Mavjud emas"
         message_link_text = f'<a href="{html.escape(link)}">Ochish</a>' if link else "Mavjud emas"
