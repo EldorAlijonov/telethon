@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -18,11 +18,13 @@ from app.keyboards import (
     BTN_BLOCK_ID,
     BTN_BLOCKED,
     BTN_BROADCAST,
+    BTN_CANCEL,
     BTN_DELETE_ID,
     BTN_HEALTH,
     BTN_MONITORING,
     BTN_PENDING,
     BTN_STATS,
+    admin_cancel_keyboard,
     admin_control_keyboard,
     admin_panel_keyboard,
     admin_user_list_pagination_keyboard,
@@ -71,6 +73,11 @@ def register_admin_handlers(
     async def admin_system_menu(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("⚙️ Tizim bo'limi", reply_markup=admin_system_keyboard())
+
+    @router.message(StateFilter(AdminActionState), F.text == BTN_CANCEL, admin_filter)
+    async def cancel_admin_action(message: Message, state: FSMContext):
+        await state.clear()
+        await message.answer("Amal bekor qilindi.", reply_markup=admin_users_keyboard())
 
     @router.message(F.text == BTN_PENDING, admin_filter)
     async def pending_users(message: Message):
@@ -238,7 +245,7 @@ def register_admin_handlers(
     @router.message(F.text == BTN_APPROVE_ID, admin_filter)
     async def ask_approve(message: Message, state: FSMContext):
         await state.set_state(AdminActionState.waiting_for_approve_user_id)
-        await message.answer("Tasdiqlash uchun Telegram ID yuboring.", reply_markup=admin_users_keyboard())
+        await message.answer("Tasdiqlash uchun Telegram ID yuboring.", reply_markup=admin_cancel_keyboard())
 
     @router.message(AdminActionState.waiting_for_approve_user_id, admin_filter)
     async def approve_by_id(message: Message, state: FSMContext):
@@ -255,7 +262,7 @@ def register_admin_handlers(
         await state.update_data(approve_tg_id=tg_id)
         await message.answer(
             f"ID: {tg_id}\nFoydalanish muddatini kunlarda kiriting.\n\nMasalan: 8",
-            reply_markup=admin_users_keyboard(),
+            reply_markup=admin_cancel_keyboard(),
         )
 
     @router.message(AdminActionState.waiting_for_approve_access_days, admin_filter)
@@ -289,7 +296,7 @@ def register_admin_handlers(
     @router.message(F.text == BTN_BLOCK_ID, admin_filter)
     async def ask_block(message: Message, state: FSMContext):
         await state.set_state(AdminActionState.waiting_for_block_user_id)
-        await message.answer("Bloklash uchun Telegram ID yuboring.", reply_markup=admin_users_keyboard())
+        await message.answer("Bloklash uchun Telegram ID yuboring.", reply_markup=admin_cancel_keyboard())
 
     @router.message(AdminActionState.waiting_for_block_user_id, admin_filter)
     async def block_by_id(message: Message, state: FSMContext):
@@ -306,7 +313,7 @@ def register_admin_handlers(
         await message.answer(
             "O'chirish uchun Telegram ID yuboring.\n\n"
             "Diqqat: foydalanuvchi ma'lumotlari, kalit so'zlari, sessiyasi va signallari bazadan o'chiriladi.",
-            reply_markup=admin_users_keyboard(),
+            reply_markup=admin_cancel_keyboard(),
         )
 
     @router.message(AdminActionState.waiting_for_delete_user_id, admin_filter)

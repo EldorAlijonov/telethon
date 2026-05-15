@@ -164,6 +164,16 @@ def admin_users_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def admin_cancel_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=BTN_CANCEL)],
+            [KeyboardButton(text=BTN_BACK_ADMIN)],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def admin_control_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
