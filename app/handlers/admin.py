@@ -25,6 +25,7 @@ from app.keyboards import (
     BTN_STATS,
     admin_control_keyboard,
     admin_panel_keyboard,
+    admin_user_list_pagination_keyboard,
     admin_system_keyboard,
     admin_users_keyboard,
     back_to_admin_panel_keyboard,
@@ -36,6 +37,9 @@ from app.services.live_monitor_service import LiveMonitorService
 from app.services.user_service import UserService
 from app.states.admin_states import AdminActionState
 from app.utils import format_user_card
+
+
+USER_LIST_PAGE_SIZE = 5
 
 
 def register_admin_handlers(
@@ -124,23 +128,74 @@ def register_admin_handlers(
 
     @router.message(F.text == BTN_APPROVED, admin_filter)
     async def approved_users(message: Message):
-        await _send_user_list(message, await user_service.list_approved(), "Tasdiqlangan foydalanuvchilar")
+        await _send_user_page(message, "approved", 1)
 
     @router.message(F.text == BTN_BLOCKED, admin_filter)
     async def blocked_users(message: Message):
-        await _send_user_list(message, await user_service.list_blocked(), "Bloklangan foydalanuvchilar")
+        await _send_user_page(message, "blocked", 1)
 
     @router.message(F.text == BTN_ALL, admin_filter)
     async def all_users(message: Message):
-        await _send_user_list(message, await user_service.list_all(), "Barcha foydalanuvchilar")
+        await _send_user_page(message, "all", 1)
 
-    async def _send_user_list(message: Message, users, title: str):
-        if not users:
-            await message.answer(f"{title}: ro'yxat bo'sh.", reply_markup=admin_users_keyboard())
+    @router.callback_query(F.data.startswith("admin_users:list:"))
+    async def paged_users(callback: CallbackQuery):
+        if callback.from_user.id not in settings.effective_admin_ids:
+            await callback.answer("Siz admin emassiz.", show_alert=True)
             return
-        await message.answer(f"{title}:", reply_markup=admin_users_keyboard())
-        for user in users:
-            await message.answer(format_user_card(user))
+        parts = (callback.data or "").split(":")
+        if len(parts) != 4:
+            await callback.answer("Noto'g'ri sahifa.", show_alert=True)
+            return
+        _, _, kind, raw_page = parts
+        if kind not in {"approved", "blocked", "all"} or not raw_page.isdigit():
+            await callback.answer("Noto'g'ri sahifa.", show_alert=True)
+            return
+        if callback.message:
+            await _edit_user_page(callback, kind, int(raw_page))
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin_users:noop")
+    async def users_pagination_noop(callback: CallbackQuery):
+        if callback.from_user.id not in settings.effective_admin_ids:
+            await callback.answer("Siz admin emassiz.", show_alert=True)
+            return
+        await callback.answer("Joriy sahifa")
+
+    async def _send_user_page(message: Message, kind: str, page: int):
+        text, page_number, total_pages = await _build_user_page(kind, page)
+        if total_pages == 0:
+            await message.answer(text, reply_markup=admin_users_keyboard())
+            return
+        await message.answer(
+            text,
+            reply_markup=admin_user_list_pagination_keyboard(kind, page_number, total_pages),
+        )
+
+    async def _edit_user_page(callback: CallbackQuery, kind: str, page: int):
+        text, page_number, total_pages = await _build_user_page(kind, page)
+        await callback.message.edit_text(
+            text,
+            reply_markup=admin_user_list_pagination_keyboard(kind, page_number, total_pages),
+        )
+
+    async def _build_user_page(kind: str, page: int) -> tuple[str, int, int]:
+        titles = {
+            "approved": "Tasdiqlangan foydalanuvchilar",
+            "blocked": "Bloklangan foydalanuvchilar",
+            "all": "Barcha foydalanuvchilar",
+        }
+        result = await user_service.list_page(kind, page, USER_LIST_PAGE_SIZE)
+        users = result["users"]
+        total = int(result["total"])
+        page_number = int(result["page"])
+        total_pages = int(result["total_pages"])
+        title = titles[kind]
+        if not users:
+            return f"{title}: ro'yxat bo'sh.", page_number, 0
+        cards = "\n\n---\n\n".join(format_user_card(user) for user in users)
+        header = f"{title}\nSahifa: {page_number}/{total_pages}\nJami: {total}\n\n"
+        return header + cards, page_number, total_pages
 
     @router.message(F.text == BTN_STATS, admin_filter)
     async def stats(message: Message):

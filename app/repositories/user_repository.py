@@ -29,13 +29,27 @@ class UserRepository:
         result = await self.session.execute(select(User).where(User.tg_id == tg_id))
         return result.scalar_one_or_none()
 
-    async def list_by_status(self, status: UserStatus, limit: int = 50) -> list[User]:
-        result = await self.session.execute(select(User).where(User.status == status).order_by(User.id.desc()).limit(limit))
+    async def list_by_status(self, status: UserStatus, limit: int = 50, offset: int = 0) -> list[User]:
+        result = await self.session.execute(
+            select(User)
+            .where(User.status == status)
+            .order_by(User.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
         return list(result.scalars())
 
-    async def list_all(self, limit: int = 100) -> list[User]:
-        result = await self.session.execute(select(User).order_by(User.id.desc()).limit(limit))
+    async def count_by_status(self, status: UserStatus) -> int:
+        total = await self.session.scalar(select(func.count()).select_from(User).where(User.status == status))
+        return int(total or 0)
+
+    async def list_all(self, limit: int = 100, offset: int = 0) -> list[User]:
+        result = await self.session.execute(select(User).order_by(User.id.desc()).offset(offset).limit(limit))
         return list(result.scalars())
+
+    async def count_all(self) -> int:
+        total = await self.session.scalar(select(func.count()).select_from(User))
+        return int(total or 0)
 
     async def approve(self, user: User, admin_tg_id: int, access_days: int) -> None:
         now = datetime.now(UTC)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from math import ceil
 
 from app.db.models import AuditAction, User, UserStatus
 from app.db.session import Database
@@ -88,6 +89,39 @@ class UserService:
     async def list_all(self) -> list[User]:
         async with self.db.session() as session:
             return await UserRepository(session).list_all()
+
+    async def list_page(self, kind: str, page: int, page_size: int = 5) -> dict[str, object]:
+        page = max(page, 1)
+        page_size = max(1, min(page_size, 20))
+        offset = (page - 1) * page_size
+        status_by_kind = {
+            "approved": UserStatus.approved,
+            "blocked": UserStatus.blocked,
+            "pending": UserStatus.pending,
+            "all": None,
+        }
+        if kind not in status_by_kind:
+            raise ValueError("Unknown user list kind")
+        async with self.db.session() as session:
+            repo = UserRepository(session)
+            await repo.mark_expired_users()
+            status = status_by_kind[kind]
+            if status is None:
+                total = await repo.count_all()
+                users = await repo.list_all(limit=page_size, offset=offset)
+            else:
+                total = await repo.count_by_status(status)
+                users = await repo.list_by_status(status, limit=page_size, offset=offset)
+        total_pages = max(1, ceil(total / page_size))
+        if page > total_pages:
+            return await self.list_page(kind, total_pages, page_size)
+        return {
+            "users": users,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+        }
 
     async def stats(self) -> dict[str, int]:
         async with self.db.session() as session:

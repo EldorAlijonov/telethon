@@ -204,6 +204,35 @@ def pending_user_action_keyboard(tg_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def admin_user_list_pagination_keyboard(kind: str, page: int, total_pages: int) -> InlineKeyboardMarkup | None:
+    if total_pages <= 1:
+        return None
+
+    page = max(1, min(page, total_pages))
+    start = max(1, page - 2)
+    end = min(total_pages, start + 4)
+    start = max(1, end - 4)
+
+    nav_buttons: list[InlineKeyboardButton] = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton(text="Oldingi", callback_data=f"admin_users:list:{kind}:{page - 1}"))
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton(text="Keyingi", callback_data=f"admin_users:list:{kind}:{page + 1}"))
+
+    page_buttons = [
+        InlineKeyboardButton(
+            text=f"[{number}]" if number == page else str(number),
+            callback_data="admin_users:noop" if number == page else f"admin_users:list:{kind}:{number}",
+        )
+        for number in range(start, end + 1)
+    ]
+
+    rows = [page_buttons]
+    if nav_buttons:
+        rows.append(nav_buttons)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def telethon_code_keyboard(digits: list[str]) -> InlineKeyboardMarkup:
     entered = ".".join(digits) if digits else "_"
     return InlineKeyboardMarkup(
