@@ -204,8 +204,29 @@ def pending_user_action_keyboard(tg_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def admin_user_list_pagination_keyboard(kind: str, page: int, total_pages: int) -> InlineKeyboardMarkup | None:
+def admin_user_list_pagination_keyboard(
+    kind: str,
+    page: int,
+    total_pages: int,
+    pending_user_ids: list[int] | None = None,
+) -> InlineKeyboardMarkup | None:
+    rows: list[list[InlineKeyboardButton]] = []
+    for tg_id in pending_user_ids or []:
+        rows.append(
+            [
+                InlineKeyboardButton(text=f"Tasdiqlash {tg_id}", callback_data=f"admin_user:approve:{tg_id}"),
+                InlineKeyboardButton(text=f"Bekor {tg_id}", callback_data=f"admin_user:reject:{tg_id}"),
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text=f"Bloklash {tg_id}", callback_data=f"admin_user:block:{tg_id}"),
+            ]
+        )
+
     if total_pages <= 1:
+        if rows:
+            return InlineKeyboardMarkup(inline_keyboard=rows)
         return None
 
     page = max(1, min(page, total_pages))
@@ -227,7 +248,7 @@ def admin_user_list_pagination_keyboard(kind: str, page: int, total_pages: int) 
         for number in range(start, end + 1)
     ]
 
-    rows = [page_buttons]
+    rows.append(page_buttons)
     if nav_buttons:
         rows.append(nav_buttons)
     return InlineKeyboardMarkup(inline_keyboard=rows)

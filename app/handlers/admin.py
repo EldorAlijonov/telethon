@@ -29,7 +29,6 @@ from app.keyboards import (
     admin_system_keyboard,
     admin_users_keyboard,
     back_to_admin_panel_keyboard,
-    pending_user_action_keyboard,
 )
 from app.services.broadcast_service import BroadcastService
 from app.services.health_service import HealthService
@@ -75,13 +74,7 @@ def register_admin_handlers(
 
     @router.message(F.text == BTN_PENDING, admin_filter)
     async def pending_users(message: Message):
-        users = await user_service.list_pending()
-        if not users:
-            await message.answer("Tasdiqlash kutilayotgan foydalanuvchilar yo'q.", reply_markup=admin_users_keyboard())
-            return
-        await message.answer("Tasdiqlash kutilayotgan foydalanuvchilar:", reply_markup=admin_users_keyboard())
-        for user in users:
-            await message.answer(format_user_card(user), reply_markup=pending_user_action_keyboard(user.tg_id))
+        await _send_user_page(message, "pending", 1)
 
     @router.callback_query(F.data.startswith("admin_user:"))
     async def user_action(callback: CallbackQuery, state: FSMContext):
@@ -148,7 +141,7 @@ def register_admin_handlers(
             await callback.answer("Noto'g'ri sahifa.", show_alert=True)
             return
         _, _, kind, raw_page = parts
-        if kind not in {"approved", "blocked", "all"} or not raw_page.isdigit():
+        if kind not in {"pending", "approved", "blocked", "all"} or not raw_page.isdigit():
             await callback.answer("Noto'g'ri sahifa.", show_alert=True)
             return
         if callback.message:
@@ -163,24 +156,25 @@ def register_admin_handlers(
         await callback.answer("Joriy sahifa")
 
     async def _send_user_page(message: Message, kind: str, page: int):
-        text, page_number, total_pages = await _build_user_page(kind, page)
+        text, page_number, total_pages, pending_user_ids = await _build_user_page(kind, page)
         if total_pages == 0:
             await message.answer(text, reply_markup=admin_users_keyboard())
             return
         await message.answer(
             text,
-            reply_markup=admin_user_list_pagination_keyboard(kind, page_number, total_pages),
+            reply_markup=admin_user_list_pagination_keyboard(kind, page_number, total_pages, pending_user_ids),
         )
 
     async def _edit_user_page(callback: CallbackQuery, kind: str, page: int):
-        text, page_number, total_pages = await _build_user_page(kind, page)
+        text, page_number, total_pages, pending_user_ids = await _build_user_page(kind, page)
         await callback.message.edit_text(
             text,
-            reply_markup=admin_user_list_pagination_keyboard(kind, page_number, total_pages),
+            reply_markup=admin_user_list_pagination_keyboard(kind, page_number, total_pages, pending_user_ids),
         )
 
-    async def _build_user_page(kind: str, page: int) -> tuple[str, int, int]:
+    async def _build_user_page(kind: str, page: int) -> tuple[str, int, int, list[int]]:
         titles = {
+            "pending": "Tasdiqlash kutilayotgan foydalanuvchilar",
             "approved": "Tasdiqlangan foydalanuvchilar",
             "blocked": "Bloklangan foydalanuvchilar",
             "all": "Barcha foydalanuvchilar",
@@ -192,10 +186,11 @@ def register_admin_handlers(
         total_pages = int(result["total_pages"])
         title = titles[kind]
         if not users:
-            return f"{title}: ro'yxat bo'sh.", page_number, 0
+            return f"{title}: ro'yxat bo'sh.", page_number, 0, []
         cards = "\n\n---\n\n".join(format_user_card(user) for user in users)
         header = f"{title}\nSahifa: {page_number}/{total_pages}\nJami: {total}\n\n"
-        return header + cards, page_number, total_pages
+        pending_user_ids = [user.tg_id for user in users] if kind == "pending" else []
+        return header + cards, page_number, total_pages, pending_user_ids
 
     @router.message(F.text == BTN_STATS, admin_filter)
     async def stats(message: Message):
