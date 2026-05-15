@@ -19,6 +19,7 @@ BTN_EDIT_KEYWORD = "✏️ Kalit so'zni tahrirlash"
 BTN_DELETE_KEYWORD = "🗑 Kalit so'zni o'chirish"
 BTN_CHATS = "👥 Kuzatilayotgan chatlar"
 BTN_BLOCK_CHAT = "🚫 Chatni bloklash"
+BTN_BLOCKED_CHATS = "📋 Bloklangan chatlar"
 BTN_LOGOUT = "🚪 Telegramdan chiqish"
 BTN_CANCEL = "❌ Bekor qilish"
 BTN_FEATURES = "🔙 Funksiyalar menyusi"
@@ -103,6 +104,7 @@ def monitoring_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_MONITOR_ON), KeyboardButton(text=BTN_MONITOR_OFF)],
             [KeyboardButton(text=BTN_CHATS), KeyboardButton(text=BTN_BLOCK_CHAT)],
+            [KeyboardButton(text=BTN_BLOCKED_CHATS)],
             [KeyboardButton(text=BTN_MAIN_MENU)],
         ],
         resize_keyboard=True,
@@ -197,6 +199,17 @@ def admin_system_keyboard() -> ReplyKeyboardMarkup:
 
 def back_to_admin_panel_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=BTN_BACK_ADMIN)]], resize_keyboard=True)
+
+
+def blocked_chats_keyboard(chats: list[tuple[int, str]]) -> InlineKeyboardMarkup | None:
+    if not chats:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"Blokdan chiqarish: {title[:40]}", callback_data=f"chat_unblock:{chat_id}")]
+            for chat_id, title in chats
+        ]
+    )
 
 
 def pending_user_action_keyboard(tg_id: int) -> InlineKeyboardMarkup:

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import html
 import re
 
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from app.keyboards import (
     BTN_ADD_KEYWORD,
+    BTN_BLOCKED_CHATS,
     BTN_BLOCK_CHAT,
     BTN_CANCEL,
     BTN_CHATS,
@@ -23,6 +25,7 @@ from app.keyboards import (
     BTN_MONITOR_MENU,
     BTN_MONITOR_OFF,
     BTN_MONITOR_ON,
+    blocked_chats_keyboard,
     keyword_menu_keyboard,
     monitoring_menu_keyboard,
     telethon_connected_keyboard,
@@ -40,6 +43,7 @@ from app.states.telethon_feature_states import TelethonFeatureState
 CONTROL_BUTTONS = {
     BTN_MONITOR_ON,
     BTN_MONITOR_OFF,
+    BTN_BLOCKED_CHATS,
     BTN_BLOCK_CHAT,
     BTN_KEYWORDS,
     BTN_ADD_KEYWORD,
@@ -262,6 +266,37 @@ def register_telethon_feature_handlers(
             return
         await state.clear()
         await message.answer(msg, reply_markup=monitoring_menu_keyboard())
+
+    @router.message(F.text == BTN_BLOCKED_CHATS)
+    async def blocked_chats(message: Message):
+        ok, error = await allowed_for_message(message)
+        if not ok:
+            await message.answer(error, reply_markup=user_main_keyboard())
+            return
+        chats = await live_monitor_service.list_blocked_chats(message.from_user.id)
+        if not chats:
+            await message.answer("Bloklangan chatlar yo'q.", reply_markup=monitoring_menu_keyboard())
+            return
+        body = "\n".join(f"{i}. {html.escape(title)} - <code>{chat_id}</code>" for i, (chat_id, title) in enumerate(chats[:50], 1))
+        await message.answer(
+            "Bloklangan chatlar:\n\n" + body,
+            reply_markup=blocked_chats_keyboard(chats[:50]),
+        )
+
+    @router.callback_query(F.data.startswith("chat_unblock:"))
+    async def unblock_chat(callback: CallbackQuery):
+        try:
+            chat_id = int((callback.data or "").split(":", 1)[1])
+        except (IndexError, ValueError):
+            await callback.answer("Chat ID noto'g'ri.", show_alert=True)
+            return
+        ok, error = await allowed_connected(callback.from_user.id)
+        if not ok:
+            await callback.answer(error, show_alert=True)
+            return
+        msg = await live_monitor_service.unblock_chat(callback.from_user.id, chat_id)
+        await callback.message.answer(msg, reply_markup=monitoring_menu_keyboard())
+        await callback.answer("Blokdan chiqarildi")
 
     @router.message(F.text == BTN_LOGOUT)
     async def logout(message: Message, state: FSMContext):

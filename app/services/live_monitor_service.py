@@ -329,6 +329,26 @@ class LiveMonitorService:
         entity_username = getattr(entity, "username", None)
         return await self.block_chat(tg_id, chat_id, title, entity_username)
 
+    async def list_blocked_chats(self, tg_id: int) -> list[tuple[int, str]]:
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
+                return []
+            chats = await MonitorRepository(session).list_blocked_chats(user.id)
+        return [(chat.chat_id, chat.title or (f"@{chat.username}" if chat.username else str(chat.chat_id))) for chat in chats]
+
+    async def unblock_chat(self, tg_id: int, chat_id: int) -> str:
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
+                return "Hisob topilmadi."
+            chat = await MonitorRepository(session).unblock_chat(user.id, chat_id)
+            if not chat:
+                return "Chat bloklangan ro'yxatdan topilmadi."
+            title = chat.title or (f"@{chat.username}" if chat.username else str(chat.chat_id))
+        safe_title = html.escape(title)
+        return f"Chat blokdan chiqarildi.\nChat: {safe_title}\nID: <code>{chat_id}</code>"
+
     async def _is_chat_blocked(self, tg_id: int, chat_id: int) -> bool:
         async with self.db.session() as session:
             user = await UserRepository(session).get_by_tg_id(tg_id)

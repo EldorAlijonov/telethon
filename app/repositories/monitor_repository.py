@@ -26,12 +26,26 @@ class MonitorRepository:
         )
         return list(result.scalars())
 
+    async def list_blocked_chats(self, user_id: int, limit: int = 100) -> list[MonitoredChat]:
+        result = await self.session.execute(
+            select(MonitoredChat).where(MonitoredChat.user_id == user_id, MonitoredChat.is_active.is_(False)).order_by(MonitoredChat.title.asc()).limit(limit)
+        )
+        return list(result.scalars())
+
     async def is_chat_blocked(self, user_id: int, chat_id: int) -> bool:
         result = await self.session.execute(
             select(MonitoredChat.is_active).where(MonitoredChat.user_id == user_id, MonitoredChat.chat_id == chat_id)
         )
         is_active = result.scalar_one_or_none()
         return is_active is False
+
+    async def unblock_chat(self, user_id: int, chat_id: int) -> MonitoredChat | None:
+        result = await self.session.execute(select(MonitoredChat).where(MonitoredChat.user_id == user_id, MonitoredChat.chat_id == chat_id))
+        chat = result.scalar_one_or_none()
+        if not chat:
+            return None
+        chat.is_active = True
+        return chat
 
     async def save_signal(
         self,
