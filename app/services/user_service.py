@@ -80,7 +80,13 @@ class UserService:
 
     async def list_approved(self) -> list[User]:
         async with self.db.session() as session:
-            return await UserRepository(session).list_by_status(UserStatus.approved)
+            return await UserRepository(session).list_by_status(UserStatus.approved, limit=10000)
+
+    async def list_approved_with_active_sessions(self) -> list[User]:
+        async with self.db.session() as session:
+            repo = UserRepository(session)
+            await repo.mark_expired_users()
+            return await repo.list_approved_with_active_sessions()
 
     async def list_blocked(self) -> list[User]:
         async with self.db.session() as session:

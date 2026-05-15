@@ -103,6 +103,7 @@ async def main() -> None:
     dp.include_router(register_user_handlers(user_service, telethon_auth, subscription_guard, settings))
 
     logger.info("bot_started")
+    monitor_restore_task = asyncio.create_task(live_monitor_service.restore_default_monitoring(bot), name="monitor:restore")
     try:
         while True:
             try:
@@ -113,6 +114,8 @@ async def main() -> None:
                 await asyncio.sleep(10)
     finally:
         logger.info("bot_stopping")
+        monitor_restore_task.cancel()
+        await asyncio.gather(monitor_restore_task, return_exceptions=True)
         await live_monitor_service.stop_all()
         await telethon_auth.cancel_all()
         await bot.session.close()

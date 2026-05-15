@@ -133,6 +133,25 @@ class LiveMonitorService:
             await AuditRepository(session).write(AuditAction.monitoring_started, target_tg_id=tg_id)
         return True, "Kuzatish yoqildi."
 
+    async def restore_default_monitoring(self, bot: Bot) -> dict[str, int]:
+        users = await self.user_service.list_approved_with_active_sessions()
+        started = 0
+        failed = 0
+        for user in users:
+            try:
+                success, message = await self.start_monitoring(user.tg_id, bot)
+                if success:
+                    started += 1
+                else:
+                    failed += 1
+                    logger.warning("monitor_restore_skipped", tg_id=user.tg_id, reason=message)
+            except Exception as exc:
+                failed += 1
+                logger.warning("monitor_restore_failed", tg_id=user.tg_id, error=type(exc).__name__)
+            await asyncio.sleep(0.1)
+        logger.info("monitor_restore_finished", total=len(users), started=started, failed=failed)
+        return {"total": len(users), "started": started, "failed": failed}
+
     async def _handle_event_safe(self, tg_id: int, bot: Bot, event, own_id: int | None) -> None:
         started = monotonic()
         try:
@@ -402,7 +421,7 @@ class LiveMonitorService:
         phone = sender_profile.get("phone")
         phone_value = f"+{phone.lstrip('+')}" if phone else None
         safe_phone = html.escape(phone_value) if phone_value else None
-        phone_text = f'<a href="tel:{safe_phone}">+{safe_phone}</a>' if safe_phone else "Mavjud emas"
+        phone_text = f'<code><a href="tel:+{safe_phone}">{safe_phone}</a></code>' if safe_phone else "Mavjud emas"
         profile_link = sender_profile.get("profile_link")
         profile_text = f'<a href="{html.escape(profile_link)}">Ochish</a>' if profile_link else "Mavjud emas"
         message_link_text = f'<a href="{html.escape(link)}">Ochish</a>' if link else "Mavjud emas"

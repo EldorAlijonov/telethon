@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Approval, Subscription, User, UserStatus
+from app.db.models import Approval, Subscription, TelegramSession, User, UserStatus
 
 
 class UserRepository:
@@ -35,6 +35,20 @@ class UserRepository:
             .where(User.status == status)
             .order_by(User.id.desc())
             .offset(offset)
+            .limit(limit)
+        )
+        return list(result.scalars())
+
+    async def list_approved_with_active_sessions(self, limit: int = 10000) -> list[User]:
+        result = await self.session.execute(
+            select(User)
+            .join(TelegramSession, TelegramSession.user_id == User.id)
+            .where(
+                User.status == UserStatus.approved,
+                User.expires_at > datetime.now(UTC),
+                TelegramSession.revoked_at.is_(None),
+            )
+            .order_by(User.id.desc())
             .limit(limit)
         )
         return list(result.scalars())
