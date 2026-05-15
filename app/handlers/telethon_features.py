@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -7,6 +9,7 @@ from aiogram.types import Message
 
 from app.keyboards import (
     BTN_ADD_KEYWORD,
+    BTN_BLOCK_CHAT,
     BTN_CANCEL,
     BTN_CHATS,
     BTN_DELETE_KEYWORD,
@@ -37,6 +40,7 @@ from app.states.telethon_feature_states import TelethonFeatureState
 CONTROL_BUTTONS = {
     BTN_MONITOR_ON,
     BTN_MONITOR_OFF,
+    BTN_BLOCK_CHAT,
     BTN_KEYWORDS,
     BTN_ADD_KEYWORD,
     BTN_EDIT_KEYWORD,
@@ -50,6 +54,35 @@ CONTROL_BUTTONS = {
     BTN_MONITOR_MENU,
     BTN_KEYWORD_MENU,
 }
+
+
+def _extract_forwarded_chat(message: Message) -> tuple[int, str | None, str | None] | None:
+    chat = getattr(message, "forward_from_chat", None)
+    origin = getattr(message, "forward_origin", None)
+    if not chat and origin:
+        chat = getattr(origin, "chat", None) or getattr(origin, "sender_chat", None)
+    if not chat:
+        return None
+    chat_id = getattr(chat, "id", None)
+    if not chat_id:
+        return None
+    title = getattr(chat, "title", None) or getattr(chat, "full_name", None)
+    username = getattr(chat, "username", None)
+    return int(chat_id), title, username
+
+
+def _extract_chat_username(text: str | None) -> str | None:
+    value = (text or "").strip()
+    if not value:
+        return None
+    match = re.search(r"(?:https?://)?t\.me/(?:s/)?([A-Za-z0-9_]{5,32})(?:/|\?|$)", value)
+    if match:
+        return match.group(1)
+    if value.startswith("@") and re.fullmatch(r"@[A-Za-z0-9_]{5,32}", value):
+        return value[1:]
+    if re.fullmatch(r"[A-Za-z0-9_]{5,32}", value):
+        return value
+    return None
 
 
 def register_telethon_feature_handlers(
@@ -96,7 +129,7 @@ def register_telethon_feature_handlers(
         if not ok:
             await message.answer(error, reply_markup=user_main_keyboard())
             return
-        await message.answer("📡 Monitoring bo'limi", reply_markup=monitoring_menu_keyboard())
+        await message.answer("📡 Kuzatish bo'limi", reply_markup=monitoring_menu_keyboard())
 
     @router.message(F.text == BTN_KEYWORD_MENU)
     async def keyword_menu(message: Message):
@@ -197,6 +230,38 @@ def register_telethon_feature_handlers(
             return
         body = "\n".join(f"- {title}" for title in titles[:30]) if titles else "Chatlar topilmadi."
         await message.answer("Ko'rinib turgan chatlar:\n\n" + body, reply_markup=monitoring_menu_keyboard())
+
+    @router.message(F.text == BTN_BLOCK_CHAT)
+    async def block_chat_start(message: Message, state: FSMContext):
+        ok, error = await allowed_for_message(message)
+        if not ok:
+            await message.answer(error, reply_markup=user_main_keyboard())
+            return
+        await state.set_state(TelethonFeatureState.waiting_chat_block)
+        await message.answer(
+            "Bloklamoqchi bo'lgan chat @username'ini yuboring yoki o'sha guruhdan bitta xabarni forward qiling.",
+            reply_markup=telethon_state_keyboard(),
+        )
+
+    @router.message(TelethonFeatureState.waiting_chat_block)
+    async def block_chat_finish(message: Message, state: FSMContext):
+        forwarded_chat = _extract_forwarded_chat(message)
+        try:
+            if forwarded_chat:
+                chat_id, title, username = forwarded_chat
+                msg = await live_monitor_service.block_chat(message.from_user.id, chat_id, title, username)
+            else:
+                username = _extract_chat_username(message.text)
+                if not username:
+                    await message.answer("@username yoki guruhdan forward qilingan xabar yuboring.")
+                    return
+                msg = await live_monitor_service.block_chat_by_username(message.from_user.id, username)
+        except TelethonSessionInvalidError:
+            await state.clear()
+            await message.answer("Telegram sessiya eskirgan. Qayta ulaning.", reply_markup=user_main_keyboard())
+            return
+        await state.clear()
+        await message.answer(msg, reply_markup=monitoring_menu_keyboard())
 
     @router.message(F.text == BTN_LOGOUT)
     async def logout(message: Message, state: FSMContext):

@@ -6,3 +6,4 @@ class TelethonFeatureState(StatesGroup):
     waiting_keyword_edit_old = State()
     waiting_keyword_edit_new = State()
     waiting_keyword_delete = State()
+    waiting_chat_block = State()

@@ -26,6 +26,13 @@ class MonitorRepository:
         )
         return list(result.scalars())
 
+    async def is_chat_blocked(self, user_id: int, chat_id: int) -> bool:
+        result = await self.session.execute(
+            select(MonitoredChat.is_active).where(MonitoredChat.user_id == user_id, MonitoredChat.chat_id == chat_id)
+        )
+        is_active = result.scalar_one_or_none()
+        return is_active is False
+
     async def save_signal(
         self,
         user_id: int,

@@ -222,13 +222,13 @@ def register_admin_handlers(
     async def monitoring_control(message: Message, state: FSMContext):
         stats = live_monitor_service.stats()
         ids = stats["active_user_ids"]
-        body = "\n".join(f"- {tg_id}" for tg_id in ids[:50]) if ids else "Faol monitoring yo'q."
+        body = "\n".join(f"- {tg_id}" for tg_id in ids[:50]) if ids else "Faol kuzatish yo'q."
         await state.set_state(AdminActionState.waiting_for_stop_monitoring_user_id)
         await message.answer(
-            "Monitoring nazorati\n\n"
-            f"Faol monitoringlar: {stats['active_count']}\n\n"
+            "Kuzatish nazorati\n\n"
+            f"Faol kuzatishlar: {stats['active_count']}\n\n"
             f"{body}\n\n"
-            "Monitoringni majburan to'xtatish uchun user ID yuboring yoki admin panelga qayting.",
+            "Kuzatishni majburan to'xtatish uchun user ID yuboring yoki admin panelga qayting.",
             reply_markup=admin_control_keyboard(),
         )
 
@@ -240,7 +240,7 @@ def register_admin_handlers(
         tg_id = int(message.text)
         await live_monitor_service.stop_monitoring(tg_id)
         await state.clear()
-        await message.answer(f"Monitoring to'xtatildi.\nID: {tg_id}", reply_markup=admin_control_keyboard())
+        await message.answer(f"Kuzatish to'xtatildi.\nID: {tg_id}", reply_markup=admin_control_keyboard())
 
     @router.message(F.text == BTN_APPROVE_ID, admin_filter)
     async def ask_approve(message: Message, state: FSMContext):

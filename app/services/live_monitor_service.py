@@ -155,6 +155,8 @@ class LiveMonitorService:
             return
         if not await self.monitor_state.is_enabled(tg_id):
             return
+        if await self._is_chat_blocked(tg_id, chat_id):
+            return
         text = (event.raw_text or "").strip()
         if not text:
             return
@@ -292,6 +294,48 @@ class LiveMonitorService:
                 await client.disconnect()
         return titles
 
+    async def block_chat(self, tg_id: int, chat_id: int, title: str | None = None, username: str | None = None) -> str:
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
+                return "Hisob topilmadi."
+            await MonitorRepository(session).upsert_chat(user.id, chat_id, title or "Noma'lum chat", username, active=False)
+        safe_title = html.escape(title or username or str(chat_id))
+        return f"Chat bloklandi. Endi bu chatdan signal kelmaydi.\nChat: {safe_title}\nID: <code>{chat_id}</code>"
+
+    async def block_chat_by_username(self, tg_id: int, username: str) -> str:
+        session_data = await self.auth_service.get_plain_session(tg_id)
+        if not session_data:
+            return "Avval Telegram akkauntingizni ulang."
+        _, plain_session = session_data
+        client = self.runtimes.get(tg_id).client if tg_id in self.runtimes else TelegramClient(StringSession(plain_session), self.api_id, self.api_hash)
+        temporary = tg_id not in self.runtimes
+        if temporary:
+            await client.connect()
+        try:
+            entity = await client.get_entity(username)
+        except AuthKeyUnregisteredError as exc:
+            await self.auth_service.revoke_session(tg_id)
+            raise TelethonSessionInvalidError("Session invalid") from exc
+        except Exception:
+            return "Chat topilmadi. @username yoki guruhdan forward qilingan xabar yuboring."
+        finally:
+            if temporary:
+                await client.disconnect()
+        chat_id = int(getattr(entity, "id", 0) or 0)
+        if getattr(entity, "broadcast", False) or getattr(entity, "megagroup", False) or getattr(entity, "gigagroup", False):
+            chat_id = int(f"-100{chat_id}")
+        title = getattr(entity, "title", None) or getattr(entity, "username", None) or username
+        entity_username = getattr(entity, "username", None)
+        return await self.block_chat(tg_id, chat_id, title, entity_username)
+
+    async def _is_chat_blocked(self, tg_id: int, chat_id: int) -> bool:
+        async with self.db.session() as session:
+            user = await UserRepository(session).get_by_tg_id(tg_id)
+            if not user:
+                return False
+            return await MonitorRepository(session).is_chat_blocked(user.id, chat_id)
+
     @staticmethod
     def _inactive_chat(chat: Any) -> bool:
         return bool(getattr(chat, "left", False) or getattr(chat, "deactivated", False) or getattr(chat, "kicked", False))
@@ -341,14 +385,14 @@ class LiveMonitorService:
         message_link_text = f'<a href="{html.escape(link)}">Ochish</a>' if link else "Mavjud emas"
         message_at = to_tashkent_time(message_at)
         return (
-            "💬 Yangi signal topildi\n\n"
+            "<b>💬 Yangi signal topildi</b>\n\n"
             f"<blockquote>❝ {safe_text} ❞</blockquote>\n\n"
-            f"👤 Yozgan: {safe_sender}\n"
-            f"🔗 Profil: {profile_text}\n"
-            f"📞 Telefon: {safe_phone}\n"
-            f"🔗 Username: {safe_username}\n\n"
-            f"👥 Guruh: {safe_chat}\n\n"
-            f"🔗 Xabar havolasi: {message_link_text}\n"
-            f"🔑 Topilgan kalit so'z: {safe_keyword}\n"
-            f"🕒 Vaqt: {message_at:%Y-%m-%d %H:%M:%S} (Toshkent)"
+            f"<b>👤 Yozgan:</b> {safe_sender}\n"
+            f"<b>🔗 Profil:</b> {profile_text}\n"
+            f"<b>📞 Telefon:</b> <code>{safe_phone}</code>\n"
+            f"<b>🔗 Username:</b> {safe_username}\n\n"
+            f"<b>👥 Guruh:</b> {safe_chat}\n\n"
+            f"<b>🔗 Xabar havolasi:</b> {message_link_text}\n"
+            f"<b>🔑 Topilgan kalit so'z:</b> {safe_keyword}\n"
+            f"<b>🕒 Vaqt:</b> {message_at:%Y-%m-%d %H:%M:%S}"
         )

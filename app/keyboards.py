@@ -9,15 +9,16 @@ BTN_CONNECT = "🔐 Telegram ulash"
 BTN_UPDATE_PHONE = "📱 Raqamni yangilash"
 BTN_RESEND = "🔄 So'rovni qayta yuborish"
 BTN_HELP = "❓ Yordam"
-BTN_MONITOR_MENU = "📡 Monitoring"
-BTN_MONITOR_ON = "🟢 Monitoringni yoqish"
-BTN_MONITOR_OFF = "🔴 Monitoringni o'chirish"
+BTN_MONITOR_MENU = "📡 Kuzatish"
+BTN_MONITOR_ON = "🟢 Kuzatishni yoqish"
+BTN_MONITOR_OFF = "🔴 Kuzatishni o'chirish"
 BTN_KEYWORD_MENU = "🔑 Kalit so'zlar"
 BTN_KEYWORDS = "📝 Kalit so'zlarim"
 BTN_ADD_KEYWORD = "➕ Kalit so'z qo'shish"
 BTN_EDIT_KEYWORD = "✏️ Kalit so'zni tahrirlash"
 BTN_DELETE_KEYWORD = "🗑 Kalit so'zni o'chirish"
 BTN_CHATS = "👥 Kuzatilayotgan chatlar"
+BTN_BLOCK_CHAT = "🚫 Chatni bloklash"
 BTN_LOGOUT = "🚪 Telegramdan chiqish"
 BTN_CANCEL = "❌ Bekor qilish"
 BTN_FEATURES = "🔙 Funksiyalar menyusi"
@@ -34,7 +35,7 @@ BTN_ALL = "👥 Barcha foydalanuvchilar"
 BTN_STATS = "📊 Statistika"
 BTN_BROADCAST = "📣 Broadcast"
 BTN_HEALTH = "🩺 System health"
-BTN_MONITORING = "📡 Monitoring nazorati"
+BTN_MONITORING = "📡 Kuzatish nazorati"
 BTN_APPROVE_ID = "✅ ID orqali tasdiqlash"
 BTN_BLOCK_ID = "🚫 ID orqali bloklash"
 BTN_DELETE_ID = "🗑 ID orqali o'chirish"
@@ -45,7 +46,6 @@ def contact_request_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📱 Telefon raqamni ulashish", request_contact=True)],
-            [KeyboardButton(text=BTN_HELP)],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -57,7 +57,6 @@ def user_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_ACCOUNT_MENU), KeyboardButton(text=BTN_CONNECT)],
-            [KeyboardButton(text=BTN_HELP)],
         ],
         resize_keyboard=True,
         input_field_placeholder="Bo'limni tanlang",
@@ -70,7 +69,7 @@ def user_account_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_STATUS)],
             [KeyboardButton(text=BTN_CONNECT)],
             [KeyboardButton(text=BTN_UPDATE_PHONE), KeyboardButton(text=BTN_RESEND)],
-            [KeyboardButton(text=BTN_MAIN_MENU), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_MAIN_MENU)],
         ],
         resize_keyboard=True,
         input_field_placeholder="Hisob bo'limi",
@@ -92,7 +91,7 @@ def telethon_connected_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_MONITOR_MENU), KeyboardButton(text=BTN_KEYWORD_MENU)],
-            [KeyboardButton(text=BTN_ACCOUNT_MENU), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_ACCOUNT_MENU)],
         ],
         resize_keyboard=True,
         input_field_placeholder="Bo'limni tanlang",
@@ -102,12 +101,12 @@ def telethon_connected_keyboard() -> ReplyKeyboardMarkup:
 def monitoring_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_CHATS)],
             [KeyboardButton(text=BTN_MONITOR_ON), KeyboardButton(text=BTN_MONITOR_OFF)],
-            [KeyboardButton(text=BTN_MAIN_MENU), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_CHATS), KeyboardButton(text=BTN_BLOCK_CHAT)],
+            [KeyboardButton(text=BTN_MAIN_MENU)],
         ],
         resize_keyboard=True,
-        input_field_placeholder="Monitoring boshqaruvi",
+        input_field_placeholder="Kuzatish boshqaruvi",
     )
 
 
@@ -116,7 +115,7 @@ def keyword_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_KEYWORDS), KeyboardButton(text=BTN_ADD_KEYWORD)],
             [KeyboardButton(text=BTN_EDIT_KEYWORD), KeyboardButton(text=BTN_DELETE_KEYWORD)],
-            [KeyboardButton(text=BTN_MAIN_MENU), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_MAIN_MENU)],
         ],
         resize_keyboard=True,
         input_field_placeholder="Kalit so'zlarni boshqarish",
@@ -128,7 +127,7 @@ def connected_account_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_STATUS)],
             [KeyboardButton(text=BTN_LOGOUT)],
-            [KeyboardButton(text=BTN_MAIN_MENU), KeyboardButton(text=BTN_HELP)],
+            [KeyboardButton(text=BTN_MAIN_MENU)],
         ],
         resize_keyboard=True,
         input_field_placeholder="Hisob sozlamalari",
