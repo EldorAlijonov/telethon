@@ -184,6 +184,8 @@ class LiveMonitorService:
         keyword = next((item for item in keywords if item in lowered), None)
         if not keyword:
             return
+        if not await self.user_service.is_allowed(tg_id):
+            return
 
         message_id = int(getattr(event.message, "id", 0) or 0)
         dedupe_key = f"signal:dedupe:{tg_id}:{chat_id}:{message_id}:{keyword}"
