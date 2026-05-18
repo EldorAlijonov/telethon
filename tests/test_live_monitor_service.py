@@ -109,4 +109,5 @@ def test_signal_text_and_buttons_use_lichka_and_phone_button():
     assert buttons is not None
     assert buttons.inline_keyboard[0][0].text == "Lichkani ochish"
     assert buttons.inline_keyboard[1][0].text == "Tel: +998901234567"
-    assert buttons.inline_keyboard[1][0].url == "tel:+998901234567"
+    assert buttons.inline_keyboard[1][0].copy_text is not None
+    assert buttons.inline_keyboard[1][0].copy_text.text == "+998901234567"

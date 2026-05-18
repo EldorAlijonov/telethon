@@ -9,7 +9,7 @@ from typing import Any
 
 import structlog
 from aiogram import Bot
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 from redis.asyncio import Redis
 from telethon import TelegramClient, events
 from telethon.errors import AuthKeyUnregisteredError, FloodWaitError
@@ -452,7 +452,7 @@ class LiveMonitorService:
         phone = sender_profile.get("phone")
         if phone:
             phone_value = f"+{phone.lstrip('+')}"
-            rows.append([InlineKeyboardButton(text=f"Tel: {phone_value}", url=f"tel:{phone_value}")])
+            rows.append([InlineKeyboardButton(text=f"Tel: {phone_value}", copy_text=CopyTextButton(text=phone_value))])
         if link:
             rows.append([InlineKeyboardButton(text="Xabarni ochish", url=link)])
         return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
