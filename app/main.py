@@ -98,7 +98,7 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=storage)
     dp.include_router(register_admin_handlers(user_service, health_service, broadcast_service, live_monitor_service, settings))
-    dp.include_router(register_telethon_handlers(user_service, telethon_auth, subscription_guard, settings.effective_admin_ids))
+    dp.include_router(register_telethon_handlers(user_service, telethon_auth, subscription_guard, live_monitor_service, settings.effective_admin_ids))
     dp.include_router(register_telethon_feature_handlers(user_service, keyword_service, telethon_auth, subscription_guard, live_monitor_service))
     dp.include_router(register_user_handlers(user_service, telethon_auth, subscription_guard, settings))
 

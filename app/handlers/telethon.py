@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, Message
 import structlog
 
 from app.keyboards import BTN_CANCEL, BTN_CONNECT, telethon_code_keyboard, telethon_connected_keyboard, telethon_phone_keyboard, user_main_keyboard
+from app.services.live_monitor_service import LiveMonitorService
 from app.services.telethon_service import TelethonAuthService
 from app.services.subscription_service import SubscriptionGuardService
 from app.services.user_service import UserService
@@ -19,6 +20,7 @@ def register_telethon_handlers(
     user_service: UserService,
     telethon_auth: TelethonAuthService,
     subscription_guard: SubscriptionGuardService,
+    live_monitor_service: LiveMonitorService,
     admin_ids: set[int],
 ) -> Router:
     router = Router()
@@ -123,10 +125,14 @@ def register_telethon_handlers(
                 await callback.message.answer(f"Xatolik: {exc}", reply_markup=user_main_keyboard())
                 await callback.answer("Xatolik", show_alert=True)
                 return
-            await telethon_auth.save_session(callback.from_user.id, data["phone"], session)
+            success, msg = await _finish_login(callback.from_user.id, data["phone"], session, callback.bot)
             await state.clear()
             await callback.message.edit_reply_markup(reply_markup=None)
-            await callback.message.answer("Telegram akkauntingiz muvaffaqiyatli ulandi.", reply_markup=telethon_connected_keyboard())
+            await callback.message.answer(
+                "Telegram akkauntingiz muvaffaqiyatli ulandi.\n"
+                f"{msg}",
+                reply_markup=telethon_connected_keyboard() if success else user_main_keyboard(),
+            )
             await callback.answer("Ulandi")
             return
         await state.update_data(digits=digits)
@@ -161,8 +167,20 @@ def register_telethon_handlers(
             await telethon_auth.cancel(message.from_user.id)
             await message.answer("2FA tekshiruvda kutilmagan xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.", reply_markup=user_main_keyboard())
             return
-        await telethon_auth.save_session(message.from_user.id, data["phone"], session)
+        success, msg = await _finish_login(message.from_user.id, data["phone"], session, message.bot)
         await state.clear()
-        await message.answer("Telegram akkauntingiz 2FA orqali muvaffaqiyatli ulandi.", reply_markup=telethon_connected_keyboard())
+        await message.answer(
+            "Telegram akkauntingiz 2FA orqali muvaffaqiyatli ulandi.\n"
+            f"{msg}",
+            reply_markup=telethon_connected_keyboard() if success else user_main_keyboard(),
+        )
+
+    async def _finish_login(tg_id: int, phone: str, session: str, bot) -> tuple[bool, str]:
+        await telethon_auth.save_session(tg_id, phone, session)
+        success, msg = await live_monitor_service.start_monitoring(tg_id, bot)
+        if success:
+            return True, msg
+        logger.warning("auto_monitoring_start_failed", tg_id=tg_id, reason=msg)
+        return False, f"Kuzatishni avtomatik yoqib bo'lmadi: {msg}"
 
     return router
