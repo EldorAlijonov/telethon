@@ -489,14 +489,14 @@ class LiveMonitorService:
         rows: list[list[InlineKeyboardButton]] = []
         profile_link = sender_profile.get("profile_link")
         if profile_link:
-            rows.append([InlineKeyboardButton(text="Lichkani ochish", url=profile_link)])
+            rows.append([InlineKeyboardButton(text="👤 Lichkani ochish", url=profile_link)])
         phone = sender_profile.get("phone")
         if phone:
             phone_value = f"+{phone.lstrip('+')}"
             phone_digits = re.sub(r"\D", "", phone_value)
-            rows.append([InlineKeyboardButton(text=f"Tel qilish: {phone_value}", url=f"tg://resolve?phone={phone_digits}")])
+            rows.append([InlineKeyboardButton(text=f"📞 Tel qilish: {phone_value}", url=f"tg://resolve?phone={phone_digits}")])
         if link:
-            rows.append([InlineKeyboardButton(text="Xabarni ochish", url=link)])
+            rows.append([InlineKeyboardButton(text="🔗 Xabarni ochish", url=link)])
         return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
     @staticmethod
@@ -515,14 +515,14 @@ class LiveMonitorService:
         message_link_text = f'<a href="{html.escape(link)}">Ochish</a>' if link else "Mavjud emas"
         message_at = to_tashkent_time(message_at)
         return (
-            "<b>💬 Yangi signal topildi</b>\n\n"
-            f"<blockquote>❝ {safe_text} ❞</blockquote>\n\n"
-            f"<b>👤 Yozgan:</b> {safe_sender}\n"
-            f"<b>🔗 Profil:</b> {profile_text}\n"
-            f"<b>📞 Telefon:</b> {phone_text}\n"
-            f"<b>🔗 Username:</b> {safe_username}\n\n"
-            f"<b>👥 Guruh:</b> {safe_chat}\n\n"
-            f"<b>🔗 Xabar havolasi:</b> {message_link_text}\n"
-            f"<b>🔑 Topilgan kalit so'z:</b> {safe_keyword}\n"
-            f"<b>🕒 Vaqt:</b> {message_at:%Y-%m-%d %H:%M:%S}"
+            "💬 <b>Yangi signal topildi</b>\n\n"
+            f"<blockquote>« {safe_text} »</blockquote>\n\n"
+            f"👤 <b>Yozgan:</b> {safe_sender}\n"
+            f"🔗 <b>Profil:</b> {profile_text}\n"
+            f"📞 <b>Telefon:</b> {phone_text}\n"
+            f"🔗 <b>Username:</b> {safe_username}\n\n"
+            f"👥 <b>Guruh:</b> {safe_chat}\n\n"
+            f"🔗 <b>Xabar havolasi:</b> {message_link_text}\n"
+            f"🔑 <b>Topilgan kalit so'z:</b> {safe_keyword}\n"
+            f"🕒 <b>Vaqt:</b> {message_at:%Y-%m-%d %H:%M:%S}"
         )
