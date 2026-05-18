@@ -30,6 +30,8 @@ from app.utils import to_tashkent_time
 
 logger = structlog.get_logger(__name__)
 
+EXPIRED_ACCESS_NOTICE_TTL_SECONDS = 24 * 60 * 60
+
 
 class TelethonSessionInvalidError(Exception):
     pass
@@ -185,6 +187,7 @@ class LiveMonitorService:
         if not keyword:
             return
         if not await self.user_service.is_allowed(tg_id):
+            await self._notify_access_expired(bot, tg_id)
             return
 
         message_id = int(getattr(event.message, "id", 0) or 0)
@@ -376,6 +379,24 @@ class LiveMonitorService:
             if not user:
                 return False
             return await MonitorRepository(session).is_chat_blocked(user.id, chat_id)
+
+    async def _notify_access_expired(self, bot: Bot, tg_id: int) -> None:
+        notice_key = f"subscription:expired_notice:{tg_id}"
+        try:
+            should_notify = await self.redis.set(notice_key, "1", ex=EXPIRED_ACCESS_NOTICE_TTL_SECONDS, nx=True)
+        except Exception as exc:
+            logger.warning("expired_access_notice_dedupe_failed", tg_id=tg_id, error=type(exc).__name__)
+            should_notify = True
+        if not should_notify:
+            return
+        try:
+            await bot.send_message(
+                tg_id,
+                "Foydalanish muddati tugagan. Signallar vaqtincha to'xtatildi.\n\n"
+                "Obunani qayta faollashtirish uchun adminga murojaat qiling.",
+            )
+        except Exception as exc:
+            logger.warning("expired_access_notice_failed", tg_id=tg_id, error=type(exc).__name__)
 
     @staticmethod
     def _inactive_chat(chat: Any) -> bool:
