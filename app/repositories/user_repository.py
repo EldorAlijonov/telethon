@@ -29,6 +29,10 @@ class UserRepository:
         result = await self.session.execute(select(User).where(User.tg_id == tg_id))
         return result.scalar_one_or_none()
 
+    async def set_signal_destination(self, user: User, chat_id: int, title: str | None) -> None:
+        user.signal_destination_chat_id = chat_id
+        user.signal_destination_title = title
+
     async def list_by_status(self, status: UserStatus, limit: int = 50, offset: int = 0) -> list[User]:
         result = await self.session.execute(
             select(User)

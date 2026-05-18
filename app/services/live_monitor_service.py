@@ -9,6 +9,7 @@ from typing import Any
 
 import structlog
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from redis.asyncio import Redis
 from telethon import TelegramClient, events
 from telethon.errors import AuthKeyUnregisteredError, FloodWaitError
@@ -204,25 +205,16 @@ class LiveMonitorService:
         sender_name = sender_profile["name"]
         link = self._message_link(chat, chat_id, message_id)
         message_at = getattr(event.message, "date", None) or datetime.now(UTC)
+        signal_id: int | None = None
+        target_chat_id = tg_id
         delivered = False
         delivery_error: str | None = None
-
-        try:
-            await bot.send_message(
-                tg_id,
-                self._signal_text(0, keyword, text, chat_title, sender_profile, message_at, link),
-                disable_web_page_preview=True,
-            )
-            delivered = True
-            SIGNALS_DELIVERED.inc()
-        except Exception as exc:
-            delivery_error = type(exc).__name__
-            SIGNALS_FAILED.inc()
 
         async with self.db.session() as session:
             user = await UserRepository(session).get_by_tg_id(tg_id)
             if not user:
                 return
+            target_chat_id = user.signal_destination_chat_id or tg_id
             signal = await MonitorRepository(session).save_signal(
                 user_id=user.id,
                 chat_id=chat_id,
@@ -236,9 +228,26 @@ class LiveMonitorService:
             )
             if not signal:
                 return
-            await SignalDeliveryRepository(session).create_pending(signal.id, tg_id)
-            await AuditRepository(session).write(AuditAction.signal_sent, target_tg_id=tg_id, details={"keyword": keyword, "chat_id": chat_id})
+            await SignalDeliveryRepository(session).create_pending(signal.id, target_chat_id)
+            await AuditRepository(session).write(
+                AuditAction.signal_sent,
+                target_tg_id=tg_id,
+                details={"keyword": keyword, "chat_id": chat_id, "destination_chat_id": target_chat_id},
+            )
             signal_id = signal.id
+
+        try:
+            await bot.send_message(
+                target_chat_id,
+                self._signal_text(signal_id, keyword, text, chat_title, sender_profile, message_at, link),
+                disable_web_page_preview=True,
+                reply_markup=self._signal_buttons(sender_profile, link),
+            )
+            delivered = True
+            SIGNALS_DELIVERED.inc()
+        except Exception as exc:
+            delivery_error = type(exc).__name__
+            SIGNALS_FAILED.inc()
 
         SIGNALS_DETECTED.inc()
         await self.signal_queue.publish_signal(
@@ -255,21 +264,21 @@ class LiveMonitorService:
         if delivered:
             async with self.db.session() as session:
                 delivery_repo = SignalDeliveryRepository(session)
-                delivery = await delivery_repo.get_by_signal_recipient(signal_id, tg_id)
+                delivery = await delivery_repo.get_by_signal_recipient(signal_id, target_chat_id)
                 if delivery:
                     await delivery_repo.mark_delivered(delivery)
         else:
             await self.signal_queue.publish_retry(
                 {
                     "signal_id": signal_id,
-                    "tg_id": tg_id,
+                    "tg_id": target_chat_id,
                     "error": delivery_error,
                     "created_at": datetime.now(UTC).isoformat(),
                 }
             )
             async with self.db.session() as session:
                 delivery_repo = SignalDeliveryRepository(session)
-                delivery = await delivery_repo.get_by_signal_recipient(signal_id, tg_id)
+                delivery = await delivery_repo.get_by_signal_recipient(signal_id, target_chat_id)
                 if delivery:
                     await delivery_repo.mark_failed(delivery, delivery_error or "UnknownError")
         SIGNAL_LATENCY.observe(monotonic() - processing_started)
@@ -435,6 +444,20 @@ class LiveMonitorService:
         return None
 
     @staticmethod
+    def _signal_buttons(sender_profile: dict[str, str | None], link: str | None) -> InlineKeyboardMarkup | None:
+        rows: list[list[InlineKeyboardButton]] = []
+        profile_link = sender_profile.get("profile_link")
+        if profile_link:
+            rows.append([InlineKeyboardButton(text="Lichkani ochish", url=profile_link)])
+        phone = sender_profile.get("phone")
+        if phone:
+            phone_value = f"+{phone.lstrip('+')}"
+            rows.append([InlineKeyboardButton(text=f"Tel: {phone_value}", url=f"tel:{phone_value}")])
+        if link:
+            rows.append([InlineKeyboardButton(text="Xabarni ochish", url=link)])
+        return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+
+    @staticmethod
     def _signal_text(signal_id: int, keyword: str, text: str, chat_title: str, sender_profile: dict[str, str | None], message_at: datetime, link: str | None) -> str:
         safe_text = html.escape(text[:3500])
         safe_keyword = html.escape(keyword)
@@ -444,9 +467,9 @@ class LiveMonitorService:
         phone = sender_profile.get("phone")
         phone_value = f"+{phone.lstrip('+')}" if phone else None
         safe_phone = html.escape(phone_value) if phone_value else None
-        phone_text = f'<a href="tel:+{safe_phone}">{safe_phone}</a>' if safe_phone else "Mavjud emas"
+        phone_text = safe_phone if safe_phone else "Mavjud emas"
         profile_link = sender_profile.get("profile_link")
-        profile_text = f'<a href="{html.escape(profile_link)}">Ochish</a>' if profile_link else "Mavjud emas"
+        profile_text = f'<a href="{html.escape(profile_link)}">Lichkani ochish</a>' if profile_link else "Mavjud emas"
         message_link_text = f'<a href="{html.escape(link)}">Ochish</a>' if link else "Mavjud emas"
         message_at = to_tashkent_time(message_at)
         return (

@@ -26,6 +26,15 @@ class UserService:
         async with self.db.session() as session:
             return await UserRepository(session).get_by_tg_id(tg_id)
 
+    async def set_signal_destination(self, tg_id: int, chat_id: int, title: str | None) -> bool:
+        async with self.db.session() as session:
+            repo = UserRepository(session)
+            user = await repo.get_by_tg_id(tg_id)
+            if not user:
+                return False
+            await repo.set_signal_destination(user, chat_id, title)
+            return True
+
     async def is_allowed(self, tg_id: int) -> bool:
         async with self.db.session() as session:
             repo = UserRepository(session)

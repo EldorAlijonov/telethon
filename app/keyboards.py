@@ -20,6 +20,7 @@ BTN_DELETE_KEYWORD = "🗑 Kalit so'zni o'chirish"
 BTN_CHATS = "👥 Kuzatilayotgan chatlar"
 BTN_BLOCK_CHAT = "🚫 Chatni bloklash"
 BTN_BLOCKED_CHATS = "📋 Bloklangan chatlar"
+BTN_SIGNAL_DESTINATION = "Signal manzili"
 BTN_LOGOUT = "🚪 Telegramdan chiqish"
 BTN_CANCEL = "❌ Bekor qilish"
 BTN_FEATURES = "🔙 Funksiyalar menyusi"
@@ -104,7 +105,7 @@ def monitoring_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_MONITOR_ON), KeyboardButton(text=BTN_MONITOR_OFF)],
             [KeyboardButton(text=BTN_CHATS), KeyboardButton(text=BTN_BLOCK_CHAT)],
-            [KeyboardButton(text=BTN_BLOCKED_CHATS)],
+            [KeyboardButton(text=BTN_BLOCKED_CHATS), KeyboardButton(text=BTN_SIGNAL_DESTINATION)],
             [KeyboardButton(text=BTN_MAIN_MENU)],
         ],
         resize_keyboard=True,

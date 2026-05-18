@@ -25,6 +25,7 @@ from app.keyboards import (
     BTN_MONITOR_MENU,
     BTN_MONITOR_OFF,
     BTN_MONITOR_ON,
+    BTN_SIGNAL_DESTINATION,
     blocked_chats_keyboard,
     keyword_menu_keyboard,
     monitoring_menu_keyboard,
@@ -50,6 +51,7 @@ CONTROL_BUTTONS = {
     BTN_EDIT_KEYWORD,
     BTN_DELETE_KEYWORD,
     BTN_CHATS,
+    BTN_SIGNAL_DESTINATION,
     BTN_LOGOUT,
     BTN_HELP,
     BTN_CANCEL,
@@ -86,6 +88,13 @@ def _extract_chat_username(text: str | None) -> str | None:
         return value[1:]
     if re.fullmatch(r"[A-Za-z0-9_]{5,32}", value):
         return value
+    return None
+
+
+def _extract_chat_id(text: str | None) -> int | None:
+    value = (text or "").strip()
+    if re.fullmatch(r"-?\d{5,20}", value):
+        return int(value)
     return None
 
 
@@ -281,6 +290,61 @@ def register_telethon_feature_handlers(
         await message.answer(
             "Bloklangan chatlar:\n\n" + body,
             reply_markup=blocked_chats_keyboard(chats[:50]),
+        )
+
+    @router.message(F.text == BTN_SIGNAL_DESTINATION)
+    async def signal_destination_start(message: Message, state: FSMContext):
+        ok, error = await allowed_for_message(message)
+        if not ok:
+            await message.answer(error, reply_markup=user_main_keyboard())
+            return
+        current = await user_service.get(message.from_user.id)
+        current_text = ""
+        if current and current.signal_destination_chat_id:
+            title = html.escape(current.signal_destination_title or str(current.signal_destination_chat_id))
+            current_text = f"\n\nHozirgi manzil: {title} - <code>{current.signal_destination_chat_id}</code>"
+        await state.set_state(TelethonFeatureState.waiting_signal_destination)
+        await message.answer(
+            "Signallar yuboriladigan guruh yoki kanalni yuboring.\n"
+            "@username, t.me havola, chat ID yoki o'sha guruh/kanaldan forward qilingan xabar qabul qilinadi.\n\n"
+            "Bot o'sha guruh/kanalga qo'shilgan va xabar yubora oladigan bo'lishi kerak."
+            f"{current_text}",
+            reply_markup=telethon_state_keyboard(),
+        )
+
+    @router.message(TelethonFeatureState.waiting_signal_destination)
+    async def signal_destination_finish(message: Message, state: FSMContext):
+        forwarded_chat = _extract_forwarded_chat(message)
+        title: str | None = None
+        try:
+            if forwarded_chat:
+                chat_id, title, _ = forwarded_chat
+            else:
+                chat_id = _extract_chat_id(message.text)
+                username = _extract_chat_username(message.text)
+                if username:
+                    chat = await message.bot.get_chat(f"@{username}")
+                    chat_id = int(chat.id)
+                    title = getattr(chat, "title", None) or getattr(chat, "username", None)
+                elif chat_id is not None:
+                    chat = await message.bot.get_chat(chat_id)
+                    title = getattr(chat, "title", None) or getattr(chat, "username", None)
+                else:
+                    await message.answer("@username, t.me havola, chat ID yoki forward qilingan xabar yuboring.")
+                    return
+        except Exception:
+            await message.answer("Manzil topilmadi yoki bot u yerga kira olmayapti. Botni guruh/kanalga qo'shib qayta urinib ko'ring.")
+            return
+
+        saved = await user_service.set_signal_destination(message.from_user.id, chat_id, title)
+        await state.clear()
+        if not saved:
+            await message.answer("Hisob topilmadi.", reply_markup=monitoring_menu_keyboard())
+            return
+        safe_title = html.escape(title or str(chat_id))
+        await message.answer(
+            f"Signal manzili saqlandi:\n{safe_title}\nID: <code>{chat_id}</code>",
+            reply_markup=monitoring_menu_keyboard(),
         )
 
     @router.callback_query(F.data.startswith("chat_unblock:"))

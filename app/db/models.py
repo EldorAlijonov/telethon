@@ -68,6 +68,8 @@ class User(Base, TimestampMixin):
     full_name: Mapped[str | None] = mapped_column(String(255))
     username: Mapped[str | None] = mapped_column(String(128), index=True)
     phone: Mapped[str | None] = mapped_column(String(32))
+    signal_destination_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    signal_destination_title: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[UserStatus] = mapped_column(Enum(UserStatus), default=UserStatus.pending, index=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

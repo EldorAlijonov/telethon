@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -83,3 +84,29 @@ async def test_expired_user_notice_is_deduped():
     bot.send_message.assert_not_awaited()
     event.get_sender.assert_not_awaited()
     event.get_chat.assert_not_awaited()
+
+
+def test_signal_text_and_buttons_use_lichka_and_phone_button():
+    profile = {
+        "name": "Test User",
+        "username": "@test_user",
+        "phone": "+998901234567",
+        "profile_link": "https://t.me/test_user",
+    }
+
+    text = LiveMonitorService._signal_text(
+        1,
+        "signal",
+        "signal bor",
+        "Test chat",
+        profile,
+        datetime.now(),
+        "https://t.me/test_chat/1",
+    )
+    buttons = LiveMonitorService._signal_buttons(profile, "https://t.me/test_chat/1")
+
+    assert "Lichkani ochish" in text
+    assert buttons is not None
+    assert buttons.inline_keyboard[0][0].text == "Lichkani ochish"
+    assert buttons.inline_keyboard[1][0].text == "Tel: +998901234567"
+    assert buttons.inline_keyboard[1][0].url == "tel:+998901234567"
