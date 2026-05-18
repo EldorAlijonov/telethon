@@ -12,7 +12,7 @@ import structlog
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from redis.asyncio import Redis
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, functions, types
 from telethon.errors import AuthKeyUnregisteredError, FloodWaitError
 from telethon.sessions import StringSession
 
@@ -363,6 +363,35 @@ class LiveMonitorService:
         entity_username = getattr(entity, "username", None)
         return await self.block_chat(tg_id, chat_id, title, entity_username)
 
+    async def resolve_invite_destination(self, tg_id: int, invite_hash: str) -> tuple[int, str]:
+        session_data = await self.auth_service.get_plain_session(tg_id)
+        if not session_data:
+            raise ValueError("Avval Telegram akkauntingizni ulang.")
+        _, plain_session = session_data
+        client = self.runtimes.get(tg_id).client if tg_id in self.runtimes else TelegramClient(StringSession(plain_session), self.api_id, self.api_hash)
+        temporary = tg_id not in self.runtimes
+        if temporary:
+            await client.connect()
+        try:
+            invite = await client(functions.messages.CheckChatInviteRequest(invite_hash))
+        except AuthKeyUnregisteredError as exc:
+            await self.auth_service.revoke_session(tg_id)
+            raise TelethonSessionInvalidError("Session invalid") from exc
+        finally:
+            if temporary:
+                await client.disconnect()
+
+        chat = getattr(invite, "chat", None)
+        if not isinstance(invite, types.ChatInviteAlready) or not chat:
+            title = getattr(invite, "title", None) or "maxfiy guruh/kanal"
+            raise ValueError(
+                f"{title} topildi, lekin chat ID olinmadi. Telegram akkauntingiz shu guruh/kanalda a'zo bo'lishi kerak; "
+                "bot ham o'sha guruh/kanalga qo'shilgan bo'lishi shart."
+            )
+        chat_id = self._entity_chat_id(chat)
+        title = getattr(chat, "title", None) or str(chat_id)
+        return chat_id, title
+
     async def list_blocked_chats(self, tg_id: int) -> list[tuple[int, str]]:
         async with self.db.session() as session:
             user = await UserRepository(session).get_by_tg_id(tg_id)
@@ -443,6 +472,15 @@ class LiveMonitorService:
         if raw.startswith("-100"):
             return f"https://t.me/c/{raw[4:]}/{message_id}"
         return None
+
+    @staticmethod
+    def _entity_chat_id(entity: Any) -> int:
+        entity_id = int(getattr(entity, "id", 0) or 0)
+        if getattr(entity, "broadcast", False) or getattr(entity, "megagroup", False) or getattr(entity, "gigagroup", False):
+            return int(f"-100{entity_id}")
+        if entity_id > 0 and entity.__class__.__name__ == "Chat":
+            return -entity_id
+        return entity_id
 
     @staticmethod
     def _signal_buttons(sender_profile: dict[str, str | None], link: str | None) -> InlineKeyboardMarkup | None:

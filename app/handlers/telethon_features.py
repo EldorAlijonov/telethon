@@ -91,6 +91,16 @@ def _extract_chat_username(text: str | None) -> str | None:
     return None
 
 
+def _extract_invite_hash(text: str | None) -> str | None:
+    value = (text or "").strip()
+    if not value:
+        return None
+    match = re.search(r"(?:https?://)?t\.me/(?:joinchat/|\+)([A-Za-z0-9_-]{8,})", value)
+    if match:
+        return match.group(1)
+    return None
+
+
 def _extract_chat_id(text: str | None) -> int | None:
     value = (text or "").strip()
     if re.fullmatch(r"-?\d{5,20}", value):
@@ -306,7 +316,7 @@ def register_telethon_feature_handlers(
         await state.set_state(TelethonFeatureState.waiting_signal_destination)
         await message.answer(
             "Signallar yuboriladigan guruh yoki kanalni yuboring.\n"
-            "@username, t.me havola, chat ID yoki o'sha guruh/kanaldan forward qilingan xabar qabul qilinadi.\n\n"
+            "@username, t.me havola, maxfiy invite link, chat ID yoki o'sha guruh/kanaldan forward qilingan xabar qabul qilinadi.\n\n"
             "Bot o'sha guruh/kanalga qo'shilgan va xabar yubora oladigan bo'lishi kerak."
             f"{current_text}",
             reply_markup=telethon_state_keyboard(),
@@ -321,8 +331,11 @@ def register_telethon_feature_handlers(
                 chat_id, title, _ = forwarded_chat
             else:
                 chat_id = _extract_chat_id(message.text)
+                invite_hash = _extract_invite_hash(message.text)
                 username = _extract_chat_username(message.text)
-                if username:
+                if invite_hash:
+                    chat_id, title = await live_monitor_service.resolve_invite_destination(message.from_user.id, invite_hash)
+                elif username:
                     chat = await message.bot.get_chat(f"@{username}")
                     chat_id = int(chat.id)
                     title = getattr(chat, "title", None) or getattr(chat, "username", None)
@@ -330,10 +343,26 @@ def register_telethon_feature_handlers(
                     chat = await message.bot.get_chat(chat_id)
                     title = getattr(chat, "title", None) or getattr(chat, "username", None)
                 else:
-                    await message.answer("@username, t.me havola, chat ID yoki forward qilingan xabar yuboring.")
+                    await message.answer("@username, t.me havola, maxfiy invite link, chat ID yoki forward qilingan xabar yuboring.")
                     return
+        except TelethonSessionInvalidError:
+            await state.clear()
+            await message.answer("Telegram sessiya eskirgan. Qayta ulaning.", reply_markup=user_main_keyboard())
+            return
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
         except Exception:
             await message.answer("Manzil topilmadi yoki bot u yerga kira olmayapti. Botni guruh/kanalga qo'shib qayta urinib ko'ring.")
+            return
+
+        try:
+            bot_chat = await message.bot.get_chat(chat_id)
+            title = title or getattr(bot_chat, "title", None) or getattr(bot_chat, "username", None)
+        except Exception:
+            await message.answer(
+                "Chat topildi, lekin bot u yerga kira olmayapti. Botni maxfiy guruhga qo'shing yoki kanalga admin qiling, keyin qayta urinib ko'ring."
+            )
             return
 
         saved = await user_service.set_signal_destination(message.from_user.id, chat_id, title)
