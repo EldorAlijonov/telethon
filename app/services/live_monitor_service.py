@@ -178,7 +178,7 @@ class LiveMonitorService:
             return
         if not await self.monitor_state.is_enabled(tg_id):
             return
-        if await self._is_chat_blocked(tg_id, chat_id):
+        if await self._is_chat_ignored(tg_id, chat_id):
             return
         text = (event.raw_text or "").strip()
         if not text:
@@ -412,11 +412,13 @@ class LiveMonitorService:
         safe_title = html.escape(title)
         return f"Chat blokdan chiqarildi.\nChat: {safe_title}\nID: <code>{chat_id}</code>"
 
-    async def _is_chat_blocked(self, tg_id: int, chat_id: int) -> bool:
+    async def _is_chat_ignored(self, tg_id: int, chat_id: int) -> bool:
         async with self.db.session() as session:
             user = await UserRepository(session).get_by_tg_id(tg_id)
             if not user:
                 return False
+            if user.signal_destination_chat_id == chat_id:
+                return True
             return await MonitorRepository(session).is_chat_blocked(user.id, chat_id)
 
     async def _notify_access_expired(self, bot: Bot, tg_id: int) -> None:
