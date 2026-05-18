@@ -16,8 +16,12 @@ class TelegramSessionRepository:
         result = await self.session.execute(select(TelegramSession).where(TelegramSession.user_id == user_id, TelegramSession.revoked_at.is_(None)))
         return result.scalar_one_or_none()
 
+    async def get_any_by_user_id(self, user_id: int) -> TelegramSession | None:
+        result = await self.session.execute(select(TelegramSession).where(TelegramSession.user_id == user_id))
+        return result.scalar_one_or_none()
+
     async def save(self, user_id: int, phone: str, encrypted_session: str) -> TelegramSession:
-        existing = await self.get_by_user_id(user_id)
+        existing = await self.get_any_by_user_id(user_id)
         if existing:
             existing.phone = phone
             existing.encrypted_session = encrypted_session
