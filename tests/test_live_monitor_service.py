@@ -132,7 +132,7 @@ def test_signal_text_and_buttons_use_lichka_and_phone_button():
         "name": "Test User",
         "username": "@test_user",
         "phone": "+998901234567",
-        "profile_link": "https://t.me/test_user",
+        "profile_link": "tg://resolve?domain=test_user",
     }
 
     text = LiveMonitorService._signal_text(
@@ -155,3 +155,29 @@ def test_signal_text_and_buttons_use_lichka_and_phone_button():
     assert buttons.inline_keyboard[1][0].text == "📞 Tel qilish: +998901234567"
     assert buttons.inline_keyboard[1][0].url == "tg://resolve?phone=998901234567"
     assert buttons.inline_keyboard[2][0].text == "🔗 Xabarni ochish"
+
+
+def test_sender_profile_uses_private_chat_link_instead_of_profile_link():
+    class Sender:
+        id = 777
+        first_name = "Test"
+        last_name = "User"
+        username = "test_user"
+        phone = None
+
+    profile = LiveMonitorService._sender_profile(Sender())
+
+    assert profile["profile_link"] == "tg://resolve?domain=test_user"
+
+
+def test_sender_profile_falls_back_to_openmessage_for_users_without_username_or_phone():
+    class Sender:
+        id = 777
+        first_name = "Test"
+        last_name = "User"
+        username = None
+        phone = None
+
+    profile = LiveMonitorService._sender_profile(Sender())
+
+    assert profile["profile_link"] == "tg://openmessage?user_id=777"

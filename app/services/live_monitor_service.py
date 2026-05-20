@@ -457,13 +457,26 @@ class LiveMonitorService:
             return {"name": "Noma'lum", "username": None, "phone": None, "profile_link": None}
         username = getattr(sender, "username", None)
         sender_id = getattr(sender, "id", None)
-        profile_link = f"https://t.me/{username}" if username else (f"tg://user?id={sender_id}" if sender_id else None)
+        phone = getattr(sender, "phone", None)
+        profile_link = cls._private_chat_link(username=username, sender_id=sender_id, phone=phone)
         return {
             "name": cls._sender_name(sender),
             "username": f"@{username}" if username else None,
-            "phone": getattr(sender, "phone", None),
+            "phone": phone,
             "profile_link": profile_link,
         }
+
+    @staticmethod
+    def _private_chat_link(username: str | None, sender_id: int | str | None, phone: str | None) -> str | None:
+        if username:
+            return f"tg://resolve?domain={username.lstrip('@')}"
+        if phone:
+            phone_digits = re.sub(r"\D", "", f"+{phone.lstrip('+')}")
+            if phone_digits:
+                return f"tg://resolve?phone={phone_digits}"
+        if sender_id:
+            return f"tg://openmessage?user_id={sender_id}"
+        return None
 
     @staticmethod
     def _message_link(chat: Any, chat_id: int, message_id: int) -> str | None:
