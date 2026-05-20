@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import monotonic
@@ -10,6 +9,7 @@ from typing import Any
 
 import structlog
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from redis.asyncio import Redis
 from telethon import TelegramClient, events, functions, types
@@ -103,8 +103,6 @@ class LiveMonitorService:
             return False, "Telegram sessiya eskirgan. Qayta ulaning."
 
         own_id = int(me.id) if me else None
-        if own_id:
-            self.blacklist_ids.add(own_id)
 
         async def handler(event):
             runtime = self.runtimes.get(tg_id)
@@ -247,7 +245,8 @@ class LiveMonitorService:
             delivered = True
             SIGNALS_DELIVERED.inc()
         except Exception as exc:
-            delivery_error = type(exc).__name__
+            delivery_error = self._delivery_error(exc)
+            logger.warning("signal_delivery_failed", signal_id=signal_id, tg_id=tg_id, target_chat_id=target_chat_id, error=delivery_error)
             SIGNALS_FAILED.inc()
 
         SIGNALS_DETECTED.inc()
@@ -255,10 +254,20 @@ class LiveMonitorService:
             {
                 "signal_id": signal_id,
                 "tg_id": tg_id,
+                "target_chat_id": target_chat_id,
                 "chat_id": chat_id,
                 "message_id": message_id,
                 "keyword": keyword,
+                "matched_text": text[:4000],
+                "source_chat": chat_title,
+                "sender_name": sender_profile.get("name"),
+                "sender_username": sender_profile.get("username"),
+                "sender_phone": sender_profile.get("phone"),
+                "sender_profile_link": sender_profile.get("profile_link"),
                 "message_link": link,
+                "message_at": message_at.isoformat(),
+                "delivered": int(delivered),
+                "delivery_error": delivery_error,
                 "created_at": datetime.now(UTC).isoformat(),
             }
         )
@@ -469,14 +478,15 @@ class LiveMonitorService:
     @staticmethod
     def _private_chat_link(username: str | None, sender_id: int | str | None, phone: str | None) -> str | None:
         if username:
-            return f"tg://resolve?domain={username.lstrip('@')}"
-        if phone:
-            phone_digits = re.sub(r"\D", "", f"+{phone.lstrip('+')}")
-            if phone_digits:
-                return f"tg://resolve?phone={phone_digits}"
-        if sender_id:
-            return f"tg://openmessage?user_id={sender_id}"
+            return f"https://t.me/{username.lstrip('@')}"
         return None
+
+    @staticmethod
+    def _delivery_error(exc: Exception) -> str:
+        message = str(exc).strip()
+        if isinstance(exc, TelegramBadRequest) and message:
+            return f"{type(exc).__name__}: {message[:500]}"
+        return type(exc).__name__ if not message else f"{type(exc).__name__}: {message[:500]}"
 
     @staticmethod
     def _message_link(chat: Any, chat_id: int, message_id: int) -> str | None:
@@ -503,10 +513,6 @@ class LiveMonitorService:
         profile_link = sender_profile.get("profile_link")
         if profile_link:
             rows.append([InlineKeyboardButton(text="👤 Lichkani ochish", url=profile_link)])
-        phone = sender_profile.get("phone")
-        if phone:
-            phone_value = f"+{phone.lstrip('+')}"
-            rows.append([InlineKeyboardButton(text=f"📞 Tel qilish: {phone_value}", url=f"tel:{phone_value}")])
         if link:
             rows.append([InlineKeyboardButton(text="🔗 Xabarni ochish", url=link)])
         return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
