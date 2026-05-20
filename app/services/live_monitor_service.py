@@ -17,6 +17,7 @@ from telethon.errors import AuthKeyUnregisteredError, FloodWaitError
 from telethon.sessions import StringSession
 
 from app.db.models import AuditAction
+from app.db.models import UserStatus
 from app.db.session import Database
 from app.core.observability import ACTIVE_MONITORS, SIGNAL_LATENCY, SIGNALS_DELIVERED, SIGNALS_FAILED, SIGNALS_DETECTED, TELETHON_EVENTS
 from app.repositories.audit_repository import AuditRepository
@@ -45,6 +46,12 @@ class MonitorRuntime:
     task: asyncio.Task
     handler: Any
     event_tasks: set[asyncio.Task] = field(default_factory=set)
+
+
+@dataclass(slots=True)
+class SignalRoute:
+    user_id: int
+    target_chat_id: int
 
 
 class LiveMonitorService:
@@ -176,18 +183,20 @@ class LiveMonitorService:
             return
         if not await self.monitor_state.is_enabled(tg_id):
             return
-        if await self._is_chat_ignored(tg_id, chat_id):
-            return
         text = (event.raw_text or "").strip()
         if not text:
             return
         keywords = await self.keyword_service.list_keywords(tg_id)
-        lowered = text.lower()
+        lowered = KeywordService.normalize(text)
         keyword = next((item for item in keywords if item in lowered), None)
         if not keyword:
             return
-        if not await self.user_service.is_allowed(tg_id):
+
+        route = await self._signal_route(tg_id, chat_id)
+        if route is None:
             await self._notify_access_expired(bot, tg_id)
+            return
+        if route is False:
             return
 
         message_id = int(getattr(event.message, "id", 0) or 0)
@@ -205,17 +214,27 @@ class LiveMonitorService:
         link = self._message_link(chat, chat_id, message_id)
         message_at = getattr(event.message, "date", None) or datetime.now(UTC)
         signal_id: int | None = None
-        target_chat_id = tg_id
+        target_chat_id = route.target_chat_id
         delivered = False
         delivery_error: str | None = None
 
+        try:
+            await bot.send_message(
+                target_chat_id,
+                self._signal_text(0, keyword, text, chat_title, sender_profile, message_at, link),
+                disable_web_page_preview=True,
+                reply_markup=self._signal_buttons(sender_profile, link),
+            )
+            delivered = True
+            SIGNALS_DELIVERED.inc()
+        except Exception as exc:
+            delivery_error = self._delivery_error(exc)
+            logger.warning("signal_delivery_failed", tg_id=tg_id, target_chat_id=target_chat_id, error=delivery_error)
+            SIGNALS_FAILED.inc()
+
         async with self.db.session() as session:
-            user = await UserRepository(session).get_by_tg_id(tg_id)
-            if not user:
-                return
-            target_chat_id = user.signal_destination_chat_id or tg_id
             signal = await MonitorRepository(session).save_signal(
-                user_id=user.id,
+                user_id=route.user_id,
                 chat_id=chat_id,
                 message_id=message_id,
                 keyword=keyword,
@@ -234,20 +253,6 @@ class LiveMonitorService:
                 details={"keyword": keyword, "chat_id": chat_id, "destination_chat_id": target_chat_id},
             )
             signal_id = signal.id
-
-        try:
-            await bot.send_message(
-                target_chat_id,
-                self._signal_text(signal_id, keyword, text, chat_title, sender_profile, message_at, link),
-                disable_web_page_preview=True,
-                reply_markup=self._signal_buttons(sender_profile, link),
-            )
-            delivered = True
-            SIGNALS_DELIVERED.inc()
-        except Exception as exc:
-            delivery_error = self._delivery_error(exc)
-            logger.warning("signal_delivery_failed", signal_id=signal_id, tg_id=tg_id, target_chat_id=target_chat_id, error=delivery_error)
-            SIGNALS_FAILED.inc()
 
         SIGNALS_DETECTED.inc()
         await self.signal_queue.publish_signal(
@@ -429,6 +434,19 @@ class LiveMonitorService:
             if user.signal_destination_chat_id == chat_id:
                 return True
             return await MonitorRepository(session).is_chat_blocked(user.id, chat_id)
+
+    async def _signal_route(self, tg_id: int, chat_id: int) -> SignalRoute | bool | None:
+        async with self.db.session() as session:
+            user_repo = UserRepository(session)
+            await user_repo.mark_expired_users()
+            user = await user_repo.get_by_tg_id(tg_id)
+            if not user or user.status != UserStatus.approved or not user.expires_at or user.expires_at <= datetime.now(UTC):
+                return None
+            if user.signal_destination_chat_id == chat_id:
+                return False
+            if await MonitorRepository(session).is_chat_blocked(user.id, chat_id):
+                return False
+            return SignalRoute(user_id=user.id, target_chat_id=user.signal_destination_chat_id or tg_id)
 
     async def _notify_access_expired(self, bot: Bot, tg_id: int) -> None:
         notice_key = f"subscription:expired_notice:{tg_id}"

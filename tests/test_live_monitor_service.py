@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.services.live_monitor_service import LiveMonitorService
+from app.services.live_monitor_service import LiveMonitorService, SignalRoute
 
 
 @pytest.mark.asyncio
@@ -36,11 +36,11 @@ async def test_expired_user_receives_subscription_notice_instead_of_signal():
         blacklist_ids=set(),
         dedupe_ttl=60,
     )
-    service._is_chat_ignored = AsyncMock(return_value=False)
+    service._signal_route = AsyncMock(return_value=None)
 
     await service._handle_event(tg_id=123, bot=bot, event=event, own_id=None)
 
-    user_service.is_allowed.assert_awaited_once_with(123)
+    service._signal_route.assert_awaited_once_with(123, -100123)
     redis.set.assert_awaited_once_with("subscription:expired_notice:123", "1", ex=86400, nx=True)
     bot.send_message.assert_awaited_once()
     assert "Foydalanish muddati tugagan" in bot.send_message.await_args.args[1]
@@ -77,7 +77,7 @@ async def test_expired_user_notice_is_deduped():
         blacklist_ids=set(),
         dedupe_ttl=60,
     )
-    service._is_chat_ignored = AsyncMock(return_value=False)
+    service._signal_route = AsyncMock(return_value=None)
 
     await service._handle_event(tg_id=123, bot=bot, event=event, own_id=None)
 
@@ -115,12 +115,12 @@ async def test_ignored_destination_chat_is_not_processed():
         blacklist_ids=set(),
         dedupe_ttl=60,
     )
-    service._is_chat_ignored = AsyncMock(return_value=True)
+    service._signal_route = AsyncMock(return_value=False)
 
     await service._handle_event(tg_id=123, bot=bot, event=event, own_id=None)
 
-    service._is_chat_ignored.assert_awaited_once_with(123, -100123)
-    keyword_service.list_keywords.assert_not_awaited()
+    service._signal_route.assert_awaited_once_with(123, -100123)
+    keyword_service.list_keywords.assert_awaited_once_with(123)
     redis.set.assert_not_awaited()
     bot.send_message.assert_not_awaited()
     event.get_sender.assert_not_awaited()
@@ -266,7 +266,7 @@ async def test_signal_queue_receives_full_signal_payload(monkeypatch):
         blacklist_ids=set(),
         dedupe_ttl=60,
     )
-    service._is_chat_ignored = AsyncMock(return_value=False)
+    service._signal_route = AsyncMock(return_value=SignalRoute(user_id=42, target_chat_id=-100999))
 
     await service._handle_event(tg_id=123, bot=bot, event=event, own_id=None)
 
