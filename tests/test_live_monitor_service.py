@@ -154,7 +154,7 @@ def test_signal_text_and_buttons_use_lichka_and_phone_button():
     assert buttons.inline_keyboard[0][0].text == "👤 Lichkani ochish"
     assert buttons.inline_keyboard[0][0].url == "https://t.me/test_user"
     assert buttons.inline_keyboard[1][0].text == "📞 Tel qilish: +998901234567"
-    assert buttons.inline_keyboard[1][0].url == "tg://resolve?phone=998901234567"
+    assert buttons.inline_keyboard[1][0].url == "tel:+998901234567"
     assert buttons.inline_keyboard[2][0].text == "🔗 Xabarni ochish"
 
 
