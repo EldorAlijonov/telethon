@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import monotonic
@@ -513,6 +514,11 @@ class LiveMonitorService:
         profile_link = sender_profile.get("profile_link")
         if profile_link:
             rows.append([InlineKeyboardButton(text="👤 Lichkani ochish", url=profile_link)])
+        phone = sender_profile.get("phone")
+        if phone:
+            phone_value = f"+{phone.lstrip('+')}"
+            phone_digits = re.sub(r"\D", "", phone_value)
+            rows.append([InlineKeyboardButton(text=f"📞 Tel qilish: {phone_value}", url=f"tg://resolve?phone={phone_digits}")])
         if link:
             rows.append([InlineKeyboardButton(text="🔗 Xabarni ochish", url=link)])
         return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
