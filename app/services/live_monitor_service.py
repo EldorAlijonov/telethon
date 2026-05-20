@@ -34,6 +34,8 @@ from app.utils import to_tashkent_time
 logger = structlog.get_logger(__name__)
 
 EXPIRED_ACCESS_NOTICE_TTL_SECONDS = 24 * 60 * 60
+SIGNAL_METADATA_TIMEOUT_SECONDS = 1.5
+SIGNAL_SEND_TIMEOUT_SECONDS = 5.0
 
 
 class TelethonSessionInvalidError(Exception):
@@ -52,6 +54,12 @@ class MonitorRuntime:
 class SignalRoute:
     user_id: int
     target_chat_id: int
+
+
+@dataclass(slots=True)
+class EventMetadata:
+    sender: Any | None
+    chat: Any | None
 
 
 class LiveMonitorService:
@@ -204,7 +212,9 @@ class LiveMonitorService:
         if not await self.redis.set(dedupe_key, "1", ex=self.dedupe_ttl, nx=True):
             return
 
-        sender, chat = await asyncio.gather(event.get_sender(), event.get_chat())
+        metadata = await self._event_metadata(event, tg_id, message_id)
+        sender = metadata.sender
+        chat = metadata.chat
         if getattr(sender, "bot", False) or self._inactive_chat(chat):
             return
 
@@ -219,11 +229,14 @@ class LiveMonitorService:
         delivery_error: str | None = None
 
         try:
-            await bot.send_message(
-                target_chat_id,
-                self._signal_text(0, keyword, text, chat_title, sender_profile, message_at, link),
-                disable_web_page_preview=True,
-                reply_markup=self._signal_buttons(sender_profile, link),
+            await asyncio.wait_for(
+                bot.send_message(
+                    target_chat_id,
+                    self._signal_text(0, keyword, text, chat_title, sender_profile, message_at, link),
+                    disable_web_page_preview=True,
+                    reply_markup=self._signal_buttons(sender_profile, link),
+                ),
+                timeout=SIGNAL_SEND_TIMEOUT_SECONDS,
             )
             delivered = True
             SIGNALS_DELIVERED.inc()
@@ -448,6 +461,23 @@ class LiveMonitorService:
                 return False
             return SignalRoute(user_id=user.id, target_chat_id=user.signal_destination_chat_id or tg_id)
 
+    async def _event_metadata(self, event, tg_id: int, message_id: int) -> EventMetadata:
+        sender = getattr(event, "sender", None)
+        chat = getattr(event, "chat", None)
+        if sender is not None and chat is not None:
+            return EventMetadata(sender=sender, chat=chat)
+        try:
+            resolved_sender, resolved_chat = await asyncio.wait_for(
+                asyncio.gather(event.get_sender(), event.get_chat()),
+                timeout=SIGNAL_METADATA_TIMEOUT_SECONDS,
+            )
+            return EventMetadata(sender=resolved_sender, chat=resolved_chat)
+        except TimeoutError:
+            logger.warning("signal_metadata_resolve_timeout", tg_id=tg_id, message_id=message_id)
+        except Exception as exc:
+            logger.warning("signal_metadata_resolve_failed", tg_id=tg_id, message_id=message_id, error=type(exc).__name__)
+        return EventMetadata(sender=sender, chat=chat)
+
     async def _notify_access_expired(self, bot: Bot, tg_id: int) -> None:
         notice_key = f"subscription:expired_notice:{tg_id}"
         try:
@@ -531,12 +561,6 @@ class LiveMonitorService:
         profile_link = sender_profile.get("profile_link")
         if profile_link:
             rows.append([InlineKeyboardButton(text="👤 Lichkani ochish", url=profile_link)])
-        phone = sender_profile.get("phone")
-        if phone:
-            phone_digits = "".join(ch for ch in phone if ch.isdigit())
-            if phone_digits:
-                phone_value = f"+{phone_digits}"
-                rows.append([InlineKeyboardButton(text=f"📞 Telefon oynasi: {phone_value}", url=f"tg://resolve?phone={phone_digits}")])
         if link:
             rows.append([InlineKeyboardButton(text="🔗 Xabarni ochish", url=link)])
         return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
