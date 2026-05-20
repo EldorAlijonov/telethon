@@ -127,7 +127,7 @@ async def test_ignored_destination_chat_is_not_processed():
     event.get_chat.assert_not_awaited()
 
 
-def test_signal_text_and_buttons_keep_phone_in_text_without_tel_button():
+def test_signal_text_and_buttons_use_telegram_phone_button():
     profile = {
         "name": "Test User",
         "username": "@test_user",
@@ -153,10 +153,12 @@ def test_signal_text_and_buttons_keep_phone_in_text_without_tel_button():
     assert "🔑 <b>Topilgan kalit so'z:</b>" in text
     assert buttons.inline_keyboard[0][0].text == "👤 Lichkani ochish"
     assert buttons.inline_keyboard[0][0].url == "https://t.me/test_user"
-    assert buttons.inline_keyboard[1][0].url == "https://t.me/test_chat/1"
+    assert "Telefon oynasi: +998901234567" in buttons.inline_keyboard[1][0].text
+    assert buttons.inline_keyboard[1][0].url == "tg://resolve?phone=998901234567"
     assert "+998901234567" in text
-    assert len(buttons.inline_keyboard) == 2
-    assert buttons.inline_keyboard[1][0].text == "🔗 Xabarni ochish"
+    assert len(buttons.inline_keyboard) == 3
+    assert buttons.inline_keyboard[2][0].url == "https://t.me/test_chat/1"
+    assert "Xabarni ochish" in buttons.inline_keyboard[2][0].text
 
 
 def test_sender_profile_uses_private_chat_link_instead_of_profile_link():

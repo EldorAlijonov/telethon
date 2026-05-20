@@ -531,6 +531,12 @@ class LiveMonitorService:
         profile_link = sender_profile.get("profile_link")
         if profile_link:
             rows.append([InlineKeyboardButton(text="👤 Lichkani ochish", url=profile_link)])
+        phone = sender_profile.get("phone")
+        if phone:
+            phone_digits = "".join(ch for ch in phone if ch.isdigit())
+            if phone_digits:
+                phone_value = f"+{phone_digits}"
+                rows.append([InlineKeyboardButton(text=f"📞 Telefon oynasi: {phone_value}", url=f"tg://resolve?phone={phone_digits}")])
         if link:
             rows.append([InlineKeyboardButton(text="🔗 Xabarni ochish", url=link)])
         return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
